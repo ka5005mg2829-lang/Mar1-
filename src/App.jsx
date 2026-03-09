@@ -25,38 +25,28 @@ const FACILITY = {
   philosophyId: "Mendukung agar lansia dapat terus tinggal di lingkungan yang sudah mereka kenal. Kami fokus pada perawatan dan rehabilitasi berbasis komunitas lokal.",
 };
 
-const buildFeedbackPrompt = (answers) => `
-Kamu adalah pelatih wawancara kerja untuk posisi perawat (介護) di Jepang.
-Berikan feedback PER PERTANYAAN dalam format JSON.
+const buildFeedbackPrompt = (answers) => `Kamu adalah pelatih wawancara kerja untuk posisi perawat (介護) di Jepang.
+Berikan feedback PER PERTANYAAN dalam format JSON array.
 
 Fasilitas: ${FACILITY.name} - ${FACILITY.philosophy}
 
 Jawaban kandidat:
 ${QUESTIONS.map(q => answers[q.id] ? `[${q.id}] ${q.label}:\n${answers[q.id]}` : "").filter(Boolean).join("\n\n")}
 
-Kembalikan HANYA JSON array seperti ini, tanpa teks lain:
-[
-  {
-    "id": "intro",
-    "status": "good",
-    "feedback": "Penjelasan singkat mengapa bagus atau perlu diperbaiki (dalam Bahasa Indonesia)",
-    "example": ""
-  },
-  {
-    "id": "reason", 
-    "status": "improve",
-    "feedback": "Apa yang perlu diperbaiki",
-    "example": "Contoh jawaban yang lebih baik dalam Bahasa Indonesia"
-  }
-]
+INSTRUKSI PENTING:
+- Respons kamu HARUS dimulai langsung dengan karakter "[" 
+- Respons kamu HARUS diakhiri dengan karakter "]"
+- JANGAN tulis apapun sebelum "[" atau sesudah "]"
+- JANGAN gunakan markdown, backtick, atau kode blok
+
+Format JSON yang harus kamu kembalikan:
+[{"id":"intro","status":"good","feedback":"penjelasan singkat","example":""},{"id":"reason","status":"improve","feedback":"apa yang perlu diperbaiki","example":"contoh jawaban yang lebih baik"}]
 
 Aturan:
 - status hanya "good" atau "improve"
-- Jika status "good", example boleh kosong ""
-- Jika status "improve", wajib isi example dengan contoh jawaban konkret
-- Hanya sertakan pertanyaan yang dijawab
-- JANGAN tambahkan teks apapun di luar JSON
-`;
+- Jika status "good", example harus ""
+- Jika status "improve", isi example dengan contoh jawaban konkret dalam Bahasa Indonesia
+- Hanya sertakan pertanyaan yang dijawab`;
 
 const buildConvertPrompt = (answers) => `
 Buat teks wawancara kerja dalam bahasa Jepang yang mudah dipahami (やさしい日本語).
@@ -104,6 +94,7 @@ export default function App() {
   const [history, setHistory] = useState([]);
   const [selectedCandidate, setSelectedCandidate] = useState(null);
   const [editingId, setEditingId] = useState(null);
+  const [errorMsg, setErrorMsg] = useState("");
 
   useEffect(() => {
     const saved = localStorage.getItem("sakura_candidates");
@@ -146,14 +137,17 @@ export default function App() {
     if (!candidateName.trim()) return alert("候補者名を入力してください");
     setLoading(true);
     setFeedbackList([]);
+    setErrorMsg("");
     try {
       const result = await callAI(buildFeedbackPrompt(answers));
-      const clean = result.replace(/```json|```/g, "").trim();
-      const parsed = JSON.parse(clean);
+      // JSONを確実に取り出す（```json や余分なテキストを除去）
+      const match = result.match(/\[[\s\S]*\]/);
+      if (!match) throw new Error("JSONが見つかりません");
+      const parsed = JSON.parse(match[0]);
       setFeedbackList(parsed);
       setStep(2);
     } catch (e) {
-      alert("フィードバックの取得に失敗しました。もう一度試してください。");
+      setErrorMsg("フィードバックの取得に失敗しました。もう一度「✨ フィードバックをもらう」を押してください。");
     }
     setLoading(false);
   };
@@ -177,7 +171,7 @@ export default function App() {
   const handleReset = () => {
     setStep(0); setAnswers({}); setFeedbackList([]);
     setConverted(""); setCandidateName(""); setEditingId(null);
-    setScreen("list");
+    setErrorMsg(""); setScreen("list");
   };
 
   const allGood = feedbackList.length > 0 && feedbackList.every(f => f.status === "good");
@@ -202,6 +196,7 @@ export default function App() {
     qLabel: { fontSize: 13, fontWeight: 700, color: "#1a5c36", marginBottom: 8 },
     divider: { height: 1, background: "#e8ede9", margin: "20px 0" },
     tip: { background: "#fff8e6", border: "1px solid #ffd580", borderRadius: 10, padding: "12px 16px", fontSize: 13, color: "#7a5a00", marginBottom: 20 },
+    error: { background: "#fff0f0", border: "1px solid #ffb3b3", borderRadius: 10, padding: "12px 16px", fontSize: 13, color: "#cc0000", marginBottom: 20 },
     convertBox: { background: "#e8f8f0", border: "1.5px solid #5cb882", borderRadius: 14, padding: "20px", whiteSpace: "pre-wrap", fontSize: 15, lineHeight: 2.0, color: "#1a3a26" },
     footer: { background: "#f7faf8", borderTop: "1px solid #e0ece4", padding: "12px 32px", fontSize: 12, color: "#888", textAlign: "center" },
   };
@@ -340,6 +335,7 @@ export default function App() {
           {step === 1 && (
             <div>
               <div style={s.tip}>🇮🇩 インドネシア語で答えてください！<br />Jawab dalam Bahasa Indonesia!</div>
+              {errorMsg && <div style={s.error}>⚠️ {errorMsg}</div>}
               {QUESTIONS.map(q => (
                 <div key={q.id} style={s.qBlock}>
                   <div style={s.qLabel}>{q.label}</div>
@@ -376,7 +372,6 @@ export default function App() {
 
                 return (
                   <div key={q.id} style={{ background: bgColor, border: `1.5px solid ${borderColor}`, borderRadius: 14, padding: "16px", marginBottom: 16 }}>
-                    {/* 質問ラベル */}
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
                       <div style={{ fontWeight: 700, fontSize: 13, color: "#1a5c36" }}>{icon} {q.label}</div>
                       <button style={s.btnSmall(editingId === q.id ? "#888" : "#2d7a4f")}
@@ -385,7 +380,6 @@ export default function App() {
                       </button>
                     </div>
 
-                    {/* 回答表示 or 編集 */}
                     {editingId === q.id ? (
                       <textarea style={{ ...s.textarea, marginBottom: 10, borderColor: "#4aab72" }}
                         value={answers[q.id] || ""}
@@ -396,14 +390,12 @@ export default function App() {
                       </div>
                     )}
 
-                    {/* フィードバック */}
                     {fb && (
                       <div style={{ fontSize: 13, color: isGood ? "#1a6636" : "#8b4513", marginBottom: fb.example ? 10 : 0 }}>
                         💬 {fb.feedback}
                       </div>
                     )}
 
-                    {/* 修正例文 */}
                     {fb?.example && !isGood && (
                       <div style={{ background: "#fffbea", border: "1px solid #ffd580", borderRadius: 10, padding: "10px 12px", marginTop: 8 }}>
                         <div style={{ fontSize: 11, fontWeight: 700, color: "#b7791f", marginBottom: 6 }}>💡 修正例文 / Contoh jawaban yang lebih baik:</div>
@@ -418,7 +410,6 @@ export default function App() {
                 );
               })}
 
-              {/* 全体判定 */}
               <div style={{ background: allGood ? "#d4f5e2" : "#fff3cd", border: `1px solid ${allGood ? "#4aab72" : "#ffd580"}`, borderRadius: 12, padding: "14px 16px", marginBottom: 20, textAlign: "center", fontWeight: 700, fontSize: 14, color: allGood ? "#1a6636" : "#856404" }}>
                 {allGood ? "✅ 全ての回答がOKです！日本語に変換できます" : "⚠️ 🔴の回答を修正してから変換することをおすすめします"}
               </div>
