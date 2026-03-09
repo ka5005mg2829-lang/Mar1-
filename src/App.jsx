@@ -1,17 +1,17 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 const QUESTIONS = [
   { id: "intro", label: "① 自己紹介 / Perkenalan Diri", placeholder: "Nama, asal daerah, keluarga, pengalaman kerja sebelumnya..." },
-  { id: "reason", label: "② 介護を選んだ理由 / Alasan Memilih Perawatan", placeholder: "Kenapa kamu ingin bekerja di bidang perawatan? Ada pengalaman merawat keluarga?" },
+  { id: "reason", label: "② 介護を選んだ理由 / Alasan Memilih Perawatan", placeholder: "Kenapa kamu ingin bekerja di bidang perawatan?" },
   { id: "hardship", label: "③ 介護で大変だと思うこと / Hal Sulit dalam Perawatan", placeholder: "Menurutmu, apa yang paling sulit dalam pekerjaan perawatan?" },
   { id: "whySakura", label: "④ なぜさくら会を選んだか / Kenapa Memilih Sakurakai", placeholder: "Kenapa kamu ingin bekerja di Sakurakai yang ada di Shinagawa, Tokyo?" },
 ];
 
 const COMMON_QS = [
-  { id: "health", label: "⑤ 体力・健康 / Kesehatan & Stamina", placeholder: "Apakah kamu bisa kerja shift malam? Apakah kamu sehat dan kuat secara fisik?" },
+  { id: "health", label: "⑤ 体力・健康 / Kesehatan & Stamina", placeholder: "Apakah kamu bisa kerja shift malam?" },
   { id: "personality", label: "⑥ 性格・長所短所 / Kepribadian & Kelebihan/Kekurangan", placeholder: "Apa kelebihan dan kekuranganmu?" },
   { id: "trouble", label: "⑦ 困ったときの対処 / Cara Mengatasi Masalah", placeholder: "Kalau ada masalah saat bekerja, kamu akan bagaimana?" },
-  { id: "japanese", label: "⑧ 日本語の勉強 / Belajar Bahasa Jepang", placeholder: "Sekarang kamu belajar bahasa Jepang seperti apa? Sudah sampai level apa?" },
+  { id: "japanese", label: "⑧ 日本語の勉強 / Belajar Bahasa Jepang", placeholder: "Sekarang kamu belajar bahasa Jepang seperti apa?" },
   { id: "future", label: "⑨ 将来の目標 / Tujuan Masa Depan", placeholder: "3〜5 tahun ke depan, kamu ingin jadi perawat seperti apa?" },
   { id: "teamwork", label: "⑩ チームワーク / Kerja Tim", placeholder: "Kalau pendapatmu berbeda dengan teman kerja, kamu akan bagaimana?" },
   { id: "culture", label: "⑪ 日本の生活への適応 / Adaptasi Kehidupan Jepang", placeholder: "Apakah ada hal yang kamu khawatirkan tentang kehidupan di Jepang?" },
@@ -94,14 +94,41 @@ ${ALL_QUESTIONS.map(q => answers[q.id] ? `${q.label}:\n${answers[q.id]}` : "").f
 `;
 
 export default function App() {
+  const [screen, setScreen] = useState("list");
   const [step, setStep] = useState(0);
   const [facility, setFacility] = useState(FACILITY_DEFAULT);
   const [answers, setAnswers] = useState({});
+  const [candidateName, setCandidateName] = useState("");
   const [feedback, setFeedback] = useState("");
   const [converted, setConverted] = useState("");
   const [loading, setLoading] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [history, setHistory] = useState([]);
+  const [selectedCandidate, setSelectedCandidate] = useState(null);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("sakura_candidates");
+    if (saved) setHistory(JSON.parse(saved));
+  }, []);
+
+  const saveCandidate = (name, result) => {
+    const newEntry = {
+      id: Date.now(),
+      name,
+      date: new Date().toLocaleDateString("ja-JP"),
+      result,
+    };
+    const updated = [newEntry, ...history];
+    setHistory(updated);
+    localStorage.setItem("sakura_candidates", JSON.stringify(updated));
+  };
+
+  const deleteCandidate = (id) => {
+    const updated = history.filter(h => h.id !== id);
+    setHistory(updated);
+    localStorage.setItem("sakura_candidates", JSON.stringify(updated));
+  };
 
   const callAI = async (prompt) => {
     const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
@@ -123,6 +150,7 @@ export default function App() {
   const handleFeedback = async () => {
     const filled = ALL_QUESTIONS.filter(q => answers[q.id]?.trim());
     if (filled.length < 4) return alert("最低4つ以上回答してください");
+    if (!candidateName.trim()) return alert("候補者名を入力してください");
     setLoading(true);
     setFeedback("");
     setIsReady(false);
@@ -138,6 +166,7 @@ export default function App() {
     setConverted("");
     const result = await callAI(buildConvertPrompt(facility, answers));
     setConverted(result);
+    saveCandidate(candidateName, result);
     setStep(3);
     setLoading(false);
   };
@@ -150,7 +179,8 @@ export default function App() {
 
   const handleReset = () => {
     setStep(0); setAnswers({}); setFeedback("");
-    setConverted(""); setIsReady(false);
+    setConverted(""); setIsReady(false); setCandidateName("");
+    setScreen("list");
   };
 
   const STEPS = ["施設情報", "候補者回答", "フィードバック", "日本語変換"];
@@ -166,7 +196,6 @@ export default function App() {
       flex: 1, padding: "12px 4px", textAlign: "center", fontSize: 11, fontWeight: 600,
       color: active ? "#2d7a4f" : done ? "#4aab72" : "#aaa",
       borderBottom: active ? "3px solid #2d7a4f" : "3px solid transparent",
-      transition: "all 0.3s",
     }),
     body: { padding: "28px 32px" },
     label: { fontSize: 13, fontWeight: 700, color: "#2d7a4f", marginBottom: 6, display: "block" },
@@ -184,6 +213,95 @@ export default function App() {
     tip: { background: "#fff8e6", border: "1px solid #ffd580", borderRadius: 10, padding: "12px 16px", fontSize: 13, color: "#7a5a00", marginBottom: 20 },
   };
 
+  // 候補者一覧画面
+  if (screen === "list") {
+    return (
+      <div style={styles.wrap}>
+        <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;600;700&display=swap" rel="stylesheet" />
+        <div style={styles.card}>
+          <div style={styles.header}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <span style={{ fontSize: 32 }}>🌸</span>
+              <div>
+                <p style={styles.headerTitle}>介護面接トレーナー</p>
+                <p style={styles.headerSub}>候補者一覧</p>
+              </div>
+            </div>
+          </div>
+          <div style={styles.body}>
+            <button style={{ ...styles.btn(), marginBottom: 24, width: "100%", fontSize: 16 }}
+              onClick={() => { setScreen("form"); setStep(0); }}>
+              ➕ 新しい候補者を追加
+            </button>
+
+            {history.length === 0 ? (
+              <div style={{ textAlign: "center", color: "#aaa", padding: "40px 0" }}>
+                <div style={{ fontSize: 48 }}>📋</div>
+                <p>まだ候補者がいません</p>
+              </div>
+            ) : (
+              history.map(h => (
+                <div key={h.id} style={{ background: "#f7fdf9", border: "1px solid #d8f0e2", borderRadius: 12, padding: "16px", marginBottom: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 16, color: "#1a5c36" }}>👤 {h.name}</div>
+                      <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>📅 {h.date}</div>
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button style={styles.btnOutline}
+                        onClick={() => { setSelectedCandidate(h); setScreen("detail"); }}>
+                        確認
+                      </button>
+                      <button style={{ ...styles.btnOutline, color: "#e53e3e", borderColor: "#e53e3e" }}
+                        onClick={() => deleteCandidate(h.id)}>
+                        削除
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+          <div style={{ background: "#f7faf8", borderTop: "1px solid #e0ece4", padding: "12px 32px", fontSize: 12, color: "#888", textAlign: "center" }}>
+            社会福祉法人 さくら会｜面接トレーナー for インドネシア人候補者
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 候補者詳細画面
+  if (screen === "detail" && selectedCandidate) {
+    return (
+      <div style={styles.wrap}>
+        <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;600;700&display=swap" rel="stylesheet" />
+        <div style={styles.card}>
+          <div style={styles.header}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <span style={{ fontSize: 32 }}>👤</span>
+              <div>
+                <p style={styles.headerTitle}>{selectedCandidate.name}</p>
+                <p style={styles.headerSub}>📅 {selectedCandidate.date}</p>
+              </div>
+            </div>
+          </div>
+          <div style={styles.body}>
+            <p style={{ fontWeight: 700, color: "#2d7a4f", fontSize: 16, marginBottom: 16 }}>🇯🇵 やさしい日本語</p>
+            <div style={styles.convertBox}>{selectedCandidate.result}</div>
+            <div style={{ display: "flex", gap: 12, marginTop: 20, flexWrap: "wrap" }}>
+              <button style={styles.btn(copied ? "#888" : "#1a6636")}
+                onClick={() => { navigator.clipboard.writeText(selectedCandidate.result); setCopied(true); setTimeout(() => setCopied(false), 2000); }}>
+                {copied ? "✅ コピーしました！" : "📋 テキストをコピー"}
+              </button>
+              <button style={styles.btnOutline} onClick={() => setScreen("list")}>← 一覧に戻る</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 面接練習画面
   return (
     <div style={styles.wrap}>
       <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;600;700&display=swap" rel="stylesheet" />
@@ -193,7 +311,7 @@ export default function App() {
             <span style={{ fontSize: 32 }}>🌸</span>
             <div>
               <p style={styles.headerTitle}>介護面接トレーナー</p>
-              <p style={styles.headerSub}>インドネシア語 → やさしい日本語 面接練習ツール</p>
+              <p style={styles.headerSub}>インドネシア語 → やさしい日本語</p>
             </div>
           </div>
         </div>
@@ -210,6 +328,13 @@ export default function App() {
           {step === 0 && (
             <div>
               <div style={styles.tip}>📋 施設情報を確認・編集してください。</div>
+              <div style={styles.section}>
+                <label style={styles.label}>候補者名（例：Siti Rahayu）</label>
+                <input style={{ ...styles.input, borderColor: "#4aab72" }}
+                  placeholder="候補者の名前を入力..."
+                  value={candidateName}
+                  onChange={e => setCandidateName(e.target.value)} />
+              </div>
               {[
                 { key: "name", label: "施設名" },
                 { key: "location", label: "場所・アクセス" },
@@ -227,7 +352,10 @@ export default function App() {
                   )}
                 </div>
               ))}
-              <button style={styles.btn()} onClick={() => setStep(1)}>次へ：候補者回答へ →</button>
+              <div style={{ display: "flex", gap: 12 }}>
+                <button style={styles.btnOutline} onClick={() => setScreen("list")}>← 一覧に戻る</button>
+                <button style={styles.btn()} onClick={() => setStep(1)}>次へ：候補者回答へ →</button>
+              </div>
             </div>
           )}
 
@@ -286,11 +414,14 @@ export default function App() {
             <div>
               <p style={{ fontWeight: 700, color: "#2d7a4f", fontSize: 16, marginBottom: 16 }}>🇯🇵 やさしい日本語に変換されました</p>
               <div style={styles.convertBox}>{converted}</div>
+              <div style={{ background: "#e6f4ff", border: "1px solid #90caf9", borderRadius: 10, padding: "12px 16px", marginTop: 16, fontSize: 13, color: "#0d47a1" }}>
+                💡 候補者一覧に自動保存されました！
+              </div>
               <div style={{ display: "flex", gap: 12, marginTop: 20, flexWrap: "wrap" }}>
                 <button style={styles.btn(copied ? "#888" : "#1a6636")} onClick={handleCopy}>
                   {copied ? "✅ コピーしました！" : "📋 テキストをコピー"}
                 </button>
-                <button style={styles.btnOutline} onClick={() => setStep(2)}>← フィードバックに戻る</button>
+                <button style={styles.btnOutline} onClick={() => setScreen("list")}>📋 一覧に戻る</button>
                 <button style={styles.btnOutline} onClick={handleReset}>🔄 新しい候補者</button>
               </div>
             </div>
