@@ -39,8 +39,10 @@ Balas HANYA dengan JSON array berikut (tidak ada teks lain):
 ]
 
 Status: "good" = bagus, "improve" = perlu perbaikan
-Jika improve, isi example dengan contoh jawaban konkret dalam Bahasa Indonesia.
-Sertakan semua ${answeredQuestions.length} pertanyaan yang dijawab.`;
+Aturan penting:
+- feedback: maksimal 30 kata
+- example: maksimal 40 kata, hanya jika status "improve"
+- Sertakan semua ${answeredQuestions.length} pertanyaan yang dijawab`;
 };
 
 const buildConvertPrompt = (answers) => `
@@ -99,7 +101,7 @@ export default function App() {
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
-            maxOutputTokens: 3000,
+            maxOutputTokens: 8000,
             temperature: 0.3,
           }
         }),
