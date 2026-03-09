@@ -25,44 +25,69 @@ const FACILITY = {
   philosophyId: "Mendukung agar lansia dapat terus tinggal di lingkungan yang sudah mereka kenal.",
 };
 
-const buildFeedbackPrompt = (answers) => {
+const JA_LEVELS = ["N5（基礎）", "N4（初級）", "N3（中級）", "N2（上級）", "N1（流暢）"];
+const CARE_EXP = ["なし / Belum ada", "1年未満 / Kurang 1 tahun", "1〜3年 / 1-3 tahun", "3年以上 / 3+ tahun"];
+
+const buildFeedbackPrompt = (answers, profile) => {
   const answeredQuestions = QUESTIONS.filter(q => answers[q.id]?.trim());
-  return `Berikan feedback wawancara kerja perawat di Jepang dalam format JSON array.
+  return `Kamu adalah pelatih wawancara kerja senior untuk posisi perawat (介護) di Jepang.
+Berikan feedback PERSONAL dan SPESIFIK untuk kandidat ini.
 
-Jawaban kandidat:
-${answeredQuestions.map(q => `[${q.id}]: ${answers[q.id]}`).join("\n")}
+=== PROFIL KANDIDAT ===
+Nama: ${profile.name}
+Asal daerah: ${profile.origin || "tidak disebutkan"}
+Level Bahasa Jepang: ${profile.jaLevel || "tidak diketahui"}
+Pengalaman perawatan: ${profile.careExp || "tidak disebutkan"}
+Motivasi khusus: ${profile.motivation || "tidak disebutkan"}
 
-Balas HANYA dengan JSON array berikut (tidak ada teks lain):
-[
-  {"id":"${answeredQuestions[0]?.id || 'intro'}","status":"good","feedback":"...","feedbackJa":"...","example":""},
-  {"id":"...","status":"improve","feedback":"...","example":"contoh jawaban"}
-]
+=== JAWABAN KANDIDAT ===
+${answeredQuestions.map(q => `[${q.id}] ${q.label}:\n"${answers[q.id]}"`).join("\n\n")}
 
-Status: "good" = bagus, "improve" = perlu perbaikan
-Aturan penting:
-- feedback: maksimal 30 kata dalam Bahasa Indonesia
-- feedbackJa: ringkasan singkat dalam Bahasa Jepang (10 kata), untuk staf Jepang
-- example: maksimal 40 kata, hanya jika status "improve"
-- Sertakan semua ${answeredQuestions.length} pertanyaan yang dijawab`;
+=== INSTRUKSI PENTING ===
+1. Feedback HARUS menyebut kata/frasa SPESIFIK dari jawaban kandidat (bukan generik)
+2. Pertimbangkan latar belakang kandidat (asal daerah, level Jepang, pengalaman)
+3. Jika status "improve", contoh jawaban HARUS mengembangkan jawaban asli kandidat (bukan mengganti seluruhnya)
+4. Setiap feedback harus terasa PERSONAL untuk ${profile.name}, bukan template umum
+
+Balas HANYA dengan JSON array (tidak ada teks lain):
+[{"id":"${answeredQuestions[0]?.id}","status":"good","feedback":"feedback spesifik menyebut kata dari jawaban","feedbackJa":"日本語で短い要約（10字以内）","example":""}]
+
+Aturan JSON:
+- status: "good" atau "improve"  
+- feedback: 20-40 kata Bahasa Indonesia, HARUS kutip kata spesifik dari jawaban
+- feedbackJa: ringkasan 10 kata Bahasa Jepang untuk staf
+- example: jika "improve", kembangkan jawaban asli kandidat (bukan ganti seluruhnya), 30-50 kata
+- Sertakan semua ${answeredQuestions.length} pertanyaan`;
 };
 
-const buildConvertPrompt = (answers) => `
-Buat teks wawancara dalam bahasa Jepang mudah (やさしい日本語).
+const buildConvertPrompt = (answers, profile) => `
+Buat teks wawancara dalam bahasa Jepang mudah (やさしい日本語) untuk kandidat berikut.
+
+Kandidat: ${profile.name}
+Asal: ${profile.origin || "-"}
+Level Jepang: ${profile.jaLevel || "-"}
+Pengalaman: ${profile.careExp || "-"}
+Motivasi khusus: ${profile.motivation || "-"}
+
 Fasilitas: ${FACILITY.name}, ${FACILITY.location}
 
 Jawaban:
 ${QUESTIONS.map(q => answers[q.id] ? `${q.label}: ${answers[q.id]}` : "").filter(Boolean).join("\n")}
 
-Aturan: kalimat pendek, gunakan です・ます, bahasa mudah.
-Format dengan header 【】 untuk setiap bagian.
-- JANGAN gunakan ** atau tanda markdown apapun
-- JANGAN tambahkan --- atau garis pemisah di akhir`;
+Aturan:
+- Bahasa Jepang mudah, kalimat pendek, gunakan です・ます
+- Sesuaikan dengan latar belakang ${profile.name} (asal daerah, motivasi spesifik mereka)
+- Tampilkan keunikan dan kepribadian kandidat, bukan teks generik
+- JANGAN gunakan ** atau tanda markdown
+- JANGAN tambahkan --- di akhir
+
+Format dengan header 【】 untuk setiap bagian.`;
 
 export default function App() {
   const [screen, setScreen] = useState("list");
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState({});
-  const [candidateName, setCandidateName] = useState("");
+  const [profile, setProfile] = useState({ name: "", origin: "", jaLevel: "", careExp: "", motivation: "" });
   const [feedbackList, setFeedbackList] = useState([]);
   const [converted, setConverted] = useState("");
   const [loading, setLoading] = useState(false);
@@ -93,9 +118,7 @@ export default function App() {
 
   const callAI = async (prompt) => {
     const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-    if (!apiKey) throw new Error("APIキーが設定されていません (VITE_GEMINI_API_KEY)");
-
-    // gemini-1.5-flash を使用（より安定）
+    if (!apiKey) throw new Error("APIキーが設定されていません");
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
       {
@@ -103,19 +126,14 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            maxOutputTokens: 8000,
-            temperature: 0.3,
-          }
+          generationConfig: { maxOutputTokens: 8000, temperature: 0.7 }
         }),
       }
     );
-
     if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      throw new Error(`APIエラー ${res.status}: ${errData?.error?.message || res.statusText}`);
+      const err = await res.json().catch(() => ({}));
+      throw new Error(`APIエラー ${res.status}: ${err?.error?.message || res.statusText}`);
     }
-
     const data = await res.json();
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) throw new Error("AIからの応答が空です");
@@ -125,35 +143,22 @@ export default function App() {
   const handleFeedback = async () => {
     const filled = QUESTIONS.filter(q => answers[q.id]?.trim());
     if (filled.length < 4) { setErrorMsg("最低4つ以上回答してください"); return; }
-    if (!candidateName.trim()) { setErrorMsg("候補者名を入力してください"); return; }
-
+    if (!profile.name.trim()) { setErrorMsg("候補者名を入力してください"); return; }
     setLoading(true);
-    setLoadingMsg("AIがフィードバックを作成中... (10〜20秒かかります)");
+    setLoadingMsg("AIが個別フィードバックを作成中... (10〜20秒)");
     setFeedbackList([]);
     setErrorMsg("");
-
     try {
-      const result = await callAI(buildFeedbackPrompt(answers));
-
-      // JSONを取り出す（```json ブロックや余分なテキストを除去）
-      let jsonText = result;
-      const jsonMatch = result.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        jsonText = jsonMatch[0];
-      } else {
-        throw new Error("AIがJSON形式で返しませんでした。再試行してください。");
-      }
-
-      const parsed = JSON.parse(jsonText);
-      if (!Array.isArray(parsed)) throw new Error("JSONの形式が正しくありません");
-
+      const result = await callAI(buildFeedbackPrompt(answers, profile));
+      const match = result.match(/\[[\s\S]*\]/);
+      if (!match) throw new Error("JSONが見つかりません。再試行してください。");
+      const parsed = JSON.parse(match[0]);
+      if (!Array.isArray(parsed)) throw new Error("JSON形式が正しくありません");
       setFeedbackList(parsed);
       setStep(2);
     } catch (e) {
-      console.error("Feedback error:", e);
-      setErrorMsg(`エラー: ${e.message} → もう一度「フィードバックをもらう」を押してください`);
+      setErrorMsg(`エラー: ${e.message}`);
     }
-
     setLoading(false);
     setLoadingMsg("");
   };
@@ -164,9 +169,9 @@ export default function App() {
     setConverted("");
     setErrorMsg("");
     try {
-      const result = await callAI(buildConvertPrompt(answers));
+      const result = await callAI(buildConvertPrompt(answers, profile));
       setConverted(result);
-      saveCandidate(candidateName, result);
+      saveCandidate(profile.name, result);
       setStep(3);
     } catch (e) {
       setErrorMsg(`変換エラー: ${e.message}`);
@@ -183,8 +188,8 @@ export default function App() {
 
   const handleReset = () => {
     setStep(0); setAnswers({}); setFeedbackList([]);
-    setConverted(""); setCandidateName(""); setEditingId(null);
-    setErrorMsg(""); setScreen("list");
+    setConverted(""); setProfile({ name: "", origin: "", jaLevel: "", careExp: "", motivation: "" });
+    setEditingId(null); setErrorMsg(""); setScreen("list");
   };
 
   const allGood = feedbackList.length > 0 && feedbackList.every(f => f.status === "good");
@@ -201,17 +206,20 @@ export default function App() {
     btnOutline: { padding: "10px 20px", background: "#fff", border: "1.5px solid #2d7a4f", color: "#2d7a4f", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer" },
     btnSmall: (color) => ({ padding: "6px 14px", background: color || "#2d7a4f", color: "#fff", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer" }),
     input: { width: "100%", padding: "10px 14px", border: "1.5px solid #d0e8d8", borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box", background: "#f9fdfb" },
+    select: { width: "100%", padding: "10px 14px", border: "1.5px solid #d0e8d8", borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box", background: "#f9fdfb" },
     textarea: { width: "100%", padding: "10px 14px", border: "1.5px solid #d0e8d8", borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box", background: "#f9fdfb", resize: "vertical", minHeight: 80 },
     label: { fontSize: 13, fontWeight: 700, color: "#2d7a4f", marginBottom: 6, display: "block" },
-    infoBox: { background: "#f7fdf9", border: "1px solid #d8f0e2", borderRadius: 10, padding: "12px 14px", marginBottom: 16 },
+    infoBox: { background: "#f7fdf9", border: "1px solid #d8f0e2", borderRadius: 10, padding: "12px 14px", marginBottom: 12 },
     qBlock: { background: "#f7fdf9", border: "1px solid #d8f0e2", borderRadius: 12, padding: "16px", marginBottom: 14 },
-    qLabel: { fontSize: 13, fontWeight: 700, color: "#1a5c36", marginBottom: 8 },
     divider: { height: 1, background: "#e8ede9", margin: "20px 0" },
     tip: { background: "#fff8e6", border: "1px solid #ffd580", borderRadius: 10, padding: "12px 16px", fontSize: 13, color: "#7a5a00", marginBottom: 20 },
+    profileTip: { background: "#e8f4ff", border: "1px solid #90caf9", borderRadius: 10, padding: "12px 16px", fontSize: 13, color: "#1a4a7a", marginBottom: 20 },
     error: { background: "#fff0f0", border: "1.5px solid #ffb3b3", borderRadius: 10, padding: "14px 16px", fontSize: 13, color: "#cc0000", marginBottom: 16, lineHeight: 1.6 },
     loadingBox: { background: "#e8f8f0", border: "1px solid #a8ddb8", borderRadius: 10, padding: "14px 16px", fontSize: 14, color: "#1a6636", marginBottom: 16, textAlign: "center" },
     convertBox: { background: "#e8f8f0", border: "1.5px solid #5cb882", borderRadius: 14, padding: "20px", whiteSpace: "pre-wrap", fontSize: 15, lineHeight: 2.0, color: "#1a3a26" },
     footer: { background: "#f7faf8", borderTop: "1px solid #e0ece4", padding: "12px 32px", fontSize: 12, color: "#888", textAlign: "center" },
+    profileGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 },
+    profileBadge: { display: "inline-block", background: "#e8f4ff", border: "1px solid #90caf9", borderRadius: 20, padding: "3px 10px", fontSize: 11, color: "#1a4a7a", marginRight: 6, marginBottom: 4 },
   };
 
   if (screen === "list") return (
@@ -307,16 +315,57 @@ export default function App() {
         </div>
         <div style={s.body}>
 
+          {/* STEP 0: 施設情報 + 候補者プロフィール */}
           {step === 0 && (
             <div>
-              <div style={s.tip}>📋 施設情報を確認してください。/ Silakan periksa informasi fasilitas.</div>
-              <div style={{ marginBottom: 20 }}>
-                <label style={s.label}>候補者名 / Nama Kandidat</label>
+              <div style={s.profileTip}>
+                💡 プロフィールを詳しく入力するほど、<strong>その人だけのフィードバック</strong>になります！<br />
+                <span style={{ fontSize: 12, opacity: 0.8 }}>Semakin lengkap profil, semakin personal feedbacknya!</span>
+              </div>
+
+              {/* 必須 */}
+              <div style={{ marginBottom: 14 }}>
+                <label style={s.label}>候補者名 / Nama Kandidat <span style={{ color: "#e53e3e" }}>*</span></label>
                 <input style={{ ...s.input, borderColor: "#4aab72" }}
                   placeholder="例：Siti Rahayu"
-                  value={candidateName}
-                  onChange={e => setCandidateName(e.target.value)} />
+                  value={profile.name}
+                  onChange={e => setProfile({ ...profile, name: e.target.value })} />
               </div>
+
+              <div style={s.profileGrid}>
+                <div>
+                  <label style={s.label}>出身地 / Asal Daerah</label>
+                  <input style={s.input} placeholder="例：Jakarta, Jawa Barat..."
+                    value={profile.origin}
+                    onChange={e => setProfile({ ...profile, origin: e.target.value })} />
+                </div>
+                <div>
+                  <label style={s.label}>日本語レベル / Level Bahasa Jepang</label>
+                  <select style={s.select} value={profile.jaLevel}
+                    onChange={e => setProfile({ ...profile, jaLevel: e.target.value })}>
+                    <option value="">選択してください</option>
+                    {JA_LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 14 }}>
+                <label style={s.label}>介護経験 / Pengalaman Perawatan</label>
+                <select style={s.select} value={profile.careExp}
+                  onChange={e => setProfile({ ...profile, careExp: e.target.value })}>
+                  <option value="">選択してください</option>
+                  {CARE_EXP.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+
+              <div style={{ marginBottom: 20 }}>
+                <label style={s.label}>志望動機・特記事項 / Motivasi Khusus</label>
+                <textarea style={{ ...s.textarea, minHeight: 60 }}
+                  placeholder="例：祖父の介護経験あり / Punya pengalaman merawat kakek..."
+                  value={profile.motivation}
+                  onChange={e => setProfile({ ...profile, motivation: e.target.value })} />
+              </div>
+
               <div style={s.divider} />
               <p style={{ fontWeight: 700, color: "#2d7a4f", marginBottom: 12 }}>🏥 施設情報 / Informasi Fasilitas</p>
               {[
@@ -331,21 +380,29 @@ export default function App() {
                   <div style={{ fontSize: 13, color: "#5a8a6a" }}>{f.id}</div>
                 </div>
               ))}
-              <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
+              <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
                 <button style={s.btnOutline} onClick={() => setScreen("list")}>← 一覧に戻る</button>
                 <button style={s.btn()} onClick={() => { setErrorMsg(""); setStep(1); }}>次へ：回答入力へ →</button>
               </div>
             </div>
           )}
 
+          {/* STEP 1: 回答入力 */}
           {step === 1 && (
             <div>
+              {/* プロフィールバッジ */}
+              <div style={{ marginBottom: 16, padding: "10px 14px", background: "#f0f7ff", borderRadius: 10, border: "1px solid #c3deff" }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "#1a4a7a" }}>👤 {profile.name}</span>
+                {profile.origin && <span style={s.profileBadge}>📍 {profile.origin}</span>}
+                {profile.jaLevel && <span style={s.profileBadge}>🇯🇵 {profile.jaLevel}</span>}
+                {profile.careExp && <span style={s.profileBadge}>💼 {profile.careExp}</span>}
+              </div>
               <div style={s.tip}>🇮🇩 インドネシア語で答えてください！<br />Jawab dalam Bahasa Indonesia!</div>
               {errorMsg && <div style={s.error}>⚠️ {errorMsg}</div>}
               {loading && <div style={s.loadingBox}>⏳ {loadingMsg}</div>}
               {QUESTIONS.map(q => (
                 <div key={q.id} style={s.qBlock}>
-                  <div style={s.qLabel}>{q.label}</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#1a5c36", marginBottom: 8 }}>{q.label}</div>
                   <textarea style={s.textarea} placeholder={q.placeholder}
                     value={answers[q.id] || ""}
                     onChange={e => setAnswers({ ...answers, [q.id]: e.target.value })} />
@@ -361,10 +418,13 @@ export default function App() {
             </div>
           )}
 
+          {/* STEP 2: 個別フィードバック */}
           {step === 2 && (
             <div>
-              <p style={{ fontWeight: 700, color: "#2d7a4f", fontSize: 16, marginBottom: 8 }}>💬 質問ごとのフィードバック</p>
-              <div style={{ ...s.tip, marginBottom: 20 }}>
+              <p style={{ fontWeight: 700, color: "#2d7a4f", fontSize: 16, marginBottom: 4 }}>
+                💬 {profile.name} さんへのフィードバック
+              </p>
+              <div style={{ ...s.tip, marginBottom: 16 }}>
                 🟢 = 良い回答　🔴 = 要修正　✏️ をクリックして直接編集できます
               </div>
               {errorMsg && <div style={s.error}>⚠️ {errorMsg}</div>}
@@ -401,7 +461,7 @@ export default function App() {
                           💬 {fb.feedback}
                         </div>
                         {fb.feedbackJa && (
-                          <div style={{ fontSize: 12, color: "#666", marginBottom: fb.example ? 8 : 0, fontStyle: "italic" }}>
+                          <div style={{ fontSize: 12, color: "#555", marginBottom: fb.example ? 8 : 0, fontStyle: "italic" }}>
                             🇯🇵 {fb.feedbackJa}
                           </div>
                         )}
@@ -409,7 +469,7 @@ export default function App() {
                     )}
                     {fb?.example && !isGood && (
                       <div style={{ background: "#fffbea", border: "1px solid #ffd580", borderRadius: 10, padding: "10px 12px", marginTop: 8 }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: "#b7791f", marginBottom: 6 }}>💡 修正例文:</div>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#b7791f", marginBottom: 6 }}>💡 改善例文 / Contoh pengembangan jawaban:</div>
                         <div style={{ fontSize: 13, color: "#744210", lineHeight: 1.7 }}>{fb.example}</div>
                         <button style={{ ...s.btnSmall("#b7791f"), marginTop: 8 }}
                           onClick={() => setAnswers({ ...answers, [q.id]: fb.example })}>
@@ -422,7 +482,7 @@ export default function App() {
               })}
 
               <div style={{ background: allGood ? "#d4f5e2" : "#fff3cd", border: `1px solid ${allGood ? "#4aab72" : "#ffd580"}`, borderRadius: 12, padding: "14px 16px", marginBottom: 20, textAlign: "center", fontWeight: 700, fontSize: 14, color: allGood ? "#1a6636" : "#856404" }}>
-                {allGood ? "✅ 全ての回答がOKです！日本語に変換できます" : "⚠️ 🔴の回答を修正してから変換することをおすすめします"}
+                {allGood ? `✅ ${profile.name}さんの全回答がOKです！` : `⚠️ 🔴の回答を修正してから変換することをおすすめします`}
               </div>
 
               <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
@@ -438,9 +498,12 @@ export default function App() {
             </div>
           )}
 
+          {/* STEP 3: 日本語変換 */}
           {step === 3 && (
             <div>
-              <p style={{ fontWeight: 700, color: "#2d7a4f", fontSize: 16, marginBottom: 16 }}>🇯🇵 やさしい日本語に変換されました</p>
+              <p style={{ fontWeight: 700, color: "#2d7a4f", fontSize: 16, marginBottom: 16 }}>
+                🇯🇵 {profile.name} さんのやさしい日本語
+              </p>
               <div style={s.convertBox}>{converted}</div>
               <div style={{ background: "#e6f4ff", border: "1px solid #90caf9", borderRadius: 10, padding: "12px 16px", marginTop: 16, fontSize: 13, color: "#0d47a1" }}>
                 💡 候補者一覧に自動保存されました！LINEでコピーして送ってください。
