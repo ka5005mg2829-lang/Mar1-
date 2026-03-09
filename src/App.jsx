@@ -34,13 +34,14 @@ ${answeredQuestions.map(q => `[${q.id}]: ${answers[q.id]}`).join("\n")}
 
 Balas HANYA dengan JSON array berikut (tidak ada teks lain):
 [
-  {"id":"${answeredQuestions[0]?.id || 'intro'}","status":"good","feedback":"...","example":""},
+  {"id":"${answeredQuestions[0]?.id || 'intro'}","status":"good","feedback":"...","feedbackJa":"...","example":""},
   {"id":"...","status":"improve","feedback":"...","example":"contoh jawaban"}
 ]
 
 Status: "good" = bagus, "improve" = perlu perbaikan
 Aturan penting:
-- feedback: maksimal 30 kata
+- feedback: maksimal 30 kata dalam Bahasa Indonesia
+- feedbackJa: ringkasan singkat dalam Bahasa Jepang (10 kata), untuk staf Jepang
 - example: maksimal 40 kata, hanya jika status "improve"
 - Sertakan semua ${answeredQuestions.length} pertanyaan yang dijawab`;
 };
@@ -53,7 +54,9 @@ Jawaban:
 ${QUESTIONS.map(q => answers[q.id] ? `${q.label}: ${answers[q.id]}` : "").filter(Boolean).join("\n")}
 
 Aturan: kalimat pendek, gunakan です・ます, bahasa mudah.
-Format dengan header 【】 untuk setiap bagian.`;
+Format dengan header 【】 untuk setiap bagian.
+- JANGAN gunakan ** atau tanda markdown apapun
+- JANGAN tambahkan --- atau garis pemisah di akhir`;
 
 export default function App() {
   const [screen, setScreen] = useState("list");
@@ -393,8 +396,15 @@ export default function App() {
                       </div>
                     )}
                     {fb && (
-                      <div style={{ fontSize: 13, color: isGood ? "#1a6636" : "#8b4513", marginBottom: fb.example ? 10 : 0 }}>
-                        💬 {fb.feedback}
+                      <div>
+                        <div style={{ fontSize: 13, color: isGood ? "#1a6636" : "#8b4513", marginBottom: 4 }}>
+                          💬 {fb.feedback}
+                        </div>
+                        {fb.feedbackJa && (
+                          <div style={{ fontSize: 12, color: "#666", marginBottom: fb.example ? 8 : 0, fontStyle: "italic" }}>
+                            🇯🇵 {fb.feedbackJa}
+                          </div>
+                        )}
                       </div>
                     )}
                     {fb?.example && !isGood && (
