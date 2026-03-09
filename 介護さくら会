@@ -104,17 +104,20 @@ export default function App() {
   const [copied, setCopied] = useState(false);
 
   const callAI = async (prompt) => {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 1000,
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { maxOutputTokens: 1000 }
+        }),
+      }
+    );
     const data = await res.json();
-    return data.content?.[0]?.text || "エラーが発生しました";
+    return data.candidates?.[0]?.content?.parts?.[0]?.text || "エラーが発生しました";
   };
 
   const handleFeedback = async () => {
@@ -167,9 +170,9 @@ export default function App() {
     }),
     body: { padding: "28px 32px" },
     label: { fontSize: 13, fontWeight: 700, color: "#2d7a4f", marginBottom: 6, display: "block" },
-    input: { width: "100%", padding: "10px 14px", border: "1.5px solid #d0e8d8", borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box", background: "#f9fdfb", transition: "border 0.2s" },
+    input: { width: "100%", padding: "10px 14px", border: "1.5px solid #d0e8d8", borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box", background: "#f9fdfb" },
     textarea: { width: "100%", padding: "10px 14px", border: "1.5px solid #d0e8d8", borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box", background: "#f9fdfb", resize: "vertical", minHeight: 80 },
-    btn: (color) => ({ padding: "13px 28px", background: color || "#2d7a4f", color: "#fff", border: "none", borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: "pointer", transition: "transform 0.1s, opacity 0.2s" }),
+    btn: (color) => ({ padding: "13px 28px", background: color || "#2d7a4f", color: "#fff", border: "none", borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: "pointer" }),
     btnOutline: { padding: "10px 20px", background: "#fff", border: "1.5px solid #2d7a4f", color: "#2d7a4f", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer" },
     section: { marginBottom: 20 },
     qBlock: { background: "#f7fdf9", border: "1px solid #d8f0e2", borderRadius: 12, padding: "16px", marginBottom: 14 },
@@ -185,7 +188,6 @@ export default function App() {
     <div style={styles.wrap}>
       <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;600;700&display=swap" rel="stylesheet" />
       <div style={styles.card}>
-        {/* Header */}
         <div style={styles.header}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <span style={{ fontSize: 32 }}>🌸</span>
@@ -196,7 +198,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Stepper */}
         <div style={styles.stepper}>
           {STEPS.map((s, i) => (
             <div key={i} style={styles.stepItem(step === i, step > i)}>
@@ -206,11 +207,9 @@ export default function App() {
         </div>
 
         <div style={styles.body}>
-
-          {/* STEP 0: 施設情報 */}
           {step === 0 && (
             <div>
-              <div style={styles.tip}>📋 施設情報を確認・編集してください。候補者の回答に反映されます。</div>
+              <div style={styles.tip}>📋 施設情報を確認・編集してください。</div>
               {[
                 { key: "name", label: "施設名" },
                 { key: "location", label: "場所・アクセス" },
@@ -228,17 +227,13 @@ export default function App() {
                   )}
                 </div>
               ))}
-              <button style={styles.btn()} onClick={() => setStep(1)}>
-                次へ：候補者回答へ →
-              </button>
+              <button style={styles.btn()} onClick={() => setStep(1)}>次へ：候補者回答へ →</button>
             </div>
           )}
 
-          {/* STEP 1: 候補者回答 */}
           {step === 1 && (
             <div>
-              <div style={styles.tip}>🇮🇩 インドネシア語で答えてください。自分の言葉で書いてください！<br />（Jawab dalam Bahasa Indonesia dengan kata-katamu sendiri!）</div>
-
+              <div style={styles.tip}>🇮🇩 インドネシア語で答えてください！</div>
               <p style={{ fontWeight: 700, color: "#2d7a4f", marginBottom: 16 }}>📝 基本的な質問</p>
               {QUESTIONS.map(q => (
                 <div key={q.id} style={styles.qBlock}>
@@ -248,7 +243,6 @@ export default function App() {
                     onChange={e => setAnswers({ ...answers, [q.id]: e.target.value })} />
                 </div>
               ))}
-
               <div style={styles.divider} />
               <p style={{ fontWeight: 700, color: "#2d7a4f", marginBottom: 16 }}>❓ よく聞かれる質問</p>
               {COMMON_QS.map(q => (
@@ -259,7 +253,6 @@ export default function App() {
                     onChange={e => setAnswers({ ...answers, [q.id]: e.target.value })} />
                 </div>
               ))}
-
               <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
                 <button style={styles.btnOutline} onClick={() => setStep(0)}>← 戻る</button>
                 <button style={{ ...styles.btn(), opacity: loading ? 0.6 : 1 }}
@@ -270,18 +263,13 @@ export default function App() {
             </div>
           )}
 
-          {/* STEP 2: フィードバック */}
           {step === 2 && (
             <div>
-              <p style={{ fontWeight: 700, color: "#2d7a4f", fontSize: 16, marginBottom: 16 }}>
-                💬 AIからのフィードバック（インドネシア語）
-              </p>
+              <p style={{ fontWeight: 700, color: "#2d7a4f", fontSize: 16, marginBottom: 16 }}>💬 AIからのフィードバック</p>
               <div style={styles.feedbackBox}>{feedback}</div>
-
               <div style={styles.badge(isReady)}>
                 {isReady ? "✅ 内容OK！日本語に変換できます" : "⚠️ 内容を修正してから再送信してください"}
               </div>
-
               <div style={{ display: "flex", gap: 12, marginTop: 20, flexWrap: "wrap" }}>
                 <button style={styles.btnOutline} onClick={() => setStep(1)}>← 回答を修正する</button>
                 {isReady && (
@@ -294,18 +282,10 @@ export default function App() {
             </div>
           )}
 
-          {/* STEP 3: 日本語変換 */}
           {step === 3 && (
             <div>
-              <p style={{ fontWeight: 700, color: "#2d7a4f", fontSize: 16, marginBottom: 16 }}>
-                🇯🇵 やさしい日本語に変換されました
-              </p>
+              <p style={{ fontWeight: 700, color: "#2d7a4f", fontSize: 16, marginBottom: 16 }}>🇯🇵 やさしい日本語に変換されました</p>
               <div style={styles.convertBox}>{converted}</div>
-
-              <div style={{ background: "#e6f4ff", border: "1px solid #90caf9", borderRadius: 10, padding: "12px 16px", marginTop: 16, fontSize: 13, color: "#0d47a1" }}>
-                💡 この文章をコピーしてLINEで候補者に送り、声に出して練習させてください。
-              </div>
-
               <div style={{ display: "flex", gap: 12, marginTop: 20, flexWrap: "wrap" }}>
                 <button style={styles.btn(copied ? "#888" : "#1a6636")} onClick={handleCopy}>
                   {copied ? "✅ コピーしました！" : "📋 テキストをコピー"}
@@ -315,10 +295,8 @@ export default function App() {
               </div>
             </div>
           )}
-
         </div>
 
-        {/* Footer */}
         <div style={{ background: "#f7faf8", borderTop: "1px solid #e0ece4", padding: "12px 32px", fontSize: 12, color: "#888", textAlign: "center" }}>
           社会福祉法人 さくら会｜面接トレーナー for インドネシア人候補者
         </div>
