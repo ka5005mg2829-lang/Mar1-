@@ -130,8 +130,9 @@ export default function App() {
     if (saved) setHistory(JSON.parse(saved));
   }, []);
 
-  const saveCandidate = (name, result) => {
-    const newEntry = { id: Date.now(), name, date: new Date().toLocaleDateString("ja-JP"), result };
+  const saveCandidate = (name, result, savedAnswers, savedEpisodes, savedFeedback) => {
+    const newEntry = { id: Date.now(), name, date: new Date().toLocaleDateString("ja-JP"), result,
+      answers: savedAnswers || {}, episodes: savedEpisodes || {}, feedbackList: savedFeedback || [] };
     const updated = [newEntry, ...history];
     setHistory(updated);
     localStorage.setItem("sakura_candidates", JSON.stringify(updated));
@@ -205,7 +206,7 @@ export default function App() {
         .replace(/\*\*/g, '')
         .trim();
       setConverted(result);
-      saveCandidate(profile.name, result);
+      saveCandidate(profile.name, result, answers, episodes, feedbackList);
       setStep(3);
     } catch (e) {
       setErrorMsg(`変換エラー: ${e.message}`);
@@ -299,33 +300,78 @@ export default function App() {
     </div>
   );
 
-  if (screen === "detail" && selectedCandidate) return (
-    <div style={s.wrap}>
-      <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;600;700&display=swap" rel="stylesheet" />
-      <div style={s.card}>
-        <div style={s.header}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <span style={{ fontSize: 32 }}>👤</span>
-            <div>
-              <p style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>{selectedCandidate.name}</p>
-              <p style={{ fontSize: 13, opacity: 0.85, marginTop: 4 }}>📅 {selectedCandidate.date}</p>
+  if (screen === "detail" && selectedCandidate) {
+    const sc = selectedCandidate;
+    const hasFeedback = sc.feedbackList && sc.feedbackList.length > 0;
+    const hasAnswers = sc.answers && Object.keys(sc.answers).length > 0;
+    return (
+      <div style={s.wrap}>
+        <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;600;700&display=swap" rel="stylesheet" />
+        <div style={s.card}>
+          <div style={s.header}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <span style={{ fontSize: 32 }}>👤</span>
+              <div>
+                <p style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>{sc.name}</p>
+                <p style={{ fontSize: 13, opacity: 0.85, marginTop: 4 }}>📅 {sc.date}</p>
+              </div>
+            </div>
+          </div>
+          <div style={s.body}>
+
+            {/* 日本語変換 */}
+            <p style={{ fontWeight: 700, color: "#2d7a4f", fontSize: 16, marginBottom: 10 }}>🇯🇵 やさしい日本語</p>
+            <div style={s.convertBox}>{sc.result}</div>
+            <div style={{ display: "flex", gap: 12, marginTop: 12, flexWrap: "wrap" }}>
+              <button style={s.btn(copied ? "#888" : "#1a6636")}
+                onClick={() => { navigator.clipboard.writeText(sc.result); setCopied(true); setTimeout(() => setCopied(false), 2000); }}>
+                {copied ? "✅ コピーしました！" : "📋 テキストをコピー"}
+              </button>
+            </div>
+
+            {/* インドネシア語回答 */}
+            {hasAnswers && (
+              <div style={{ marginTop: 28 }}>
+                <p style={{ fontWeight: 700, color: "#2d7a4f", fontSize: 15, marginBottom: 10 }}>🇮🇩 インドネシア語の元回答</p>
+                {QUESTIONS.map(q => {
+                  const ans = sc.answers[q.id];
+                  const ep = sc.episodes?.[q.id];
+                  if (!ans?.trim()) return null;
+                  const fb = sc.feedbackList?.find(f => f.id === q.id);
+                  const isGood = fb?.status === "good";
+                  return (
+                    <div key={q.id} style={{ background: fb ? (isGood ? "#f0faf4" : "#fff8f0") : "#fafafa",
+                      border: `1.5px solid ${fb ? (isGood ? "#a8ddb8" : "#f6ad8f") : "#e0e0e0"}`,
+                      borderRadius: 12, padding: "12px 14px", marginBottom: 12 }}>
+                      <div style={{ fontWeight: 700, fontSize: 13, color: "#1a5c36", marginBottom: 6 }}>
+                        {fb ? (isGood ? "🟢" : "🔴") : "⬜"} {q.label}
+                      </div>
+                      <div style={{ fontSize: 13, color: "#333", marginBottom: ep ? 6 : 0, lineHeight: 1.7 }}>{ans}</div>
+                      {ep && (
+                        <div style={{ fontSize: 12, color: "#7a5c00", background: "#fffbea", border: "1px solid #ffd580", borderRadius: 8, padding: "6px 10px", marginTop: 4 }}>
+                          💡 エピソード: {ep}
+                        </div>
+                      )}
+                      {fb && (
+                        <div style={{ fontSize: 12, color: isGood ? "#1a6636" : "#8b4513", marginTop: 6, paddingTop: 6, borderTop: "1px solid rgba(0,0,0,0.08)" }}>
+                          💬 {fb.feedback}
+                          {fb.feedbackJa && <span style={{ color: "#555", marginLeft: 8 }}>／ 🇯🇵 {fb.feedbackJa}</span>}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 12, marginTop: 20, flexWrap: "wrap" }}>
+              <button style={s.btnOutline} onClick={() => setScreen("list")}>← 一覧に戻る</button>
             </div>
           </div>
         </div>
-        <div style={s.body}>
-          <p style={{ fontWeight: 700, color: "#2d7a4f", fontSize: 16, marginBottom: 16 }}>🇯🇵 やさしい日本語</p>
-          <div style={s.convertBox}>{selectedCandidate.result}</div>
-          <div style={{ display: "flex", gap: 12, marginTop: 20, flexWrap: "wrap" }}>
-            <button style={s.btn(copied ? "#888" : "#1a6636")}
-              onClick={() => { navigator.clipboard.writeText(selectedCandidate.result); setCopied(true); setTimeout(() => setCopied(false), 2000); }}>
-              {copied ? "✅ コピーしました！" : "📋 テキストをコピー"}
-            </button>
-            <button style={s.btnOutline} onClick={() => setScreen("list")}>← 一覧に戻る</button>
-          </div>
-        </div>
       </div>
-    </div>
-  );
+    );
+  }
 
   return (
     <div style={s.wrap}>
