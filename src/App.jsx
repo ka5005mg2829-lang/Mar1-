@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 const QUESTIONS = [
   { id: "intro", label: "① 自己紹介 / Perkenalan Diri", placeholder: "Nama, asal daerah, keluarga, pengalaman kerja sebelumnya...",
@@ -109,6 +109,20 @@ Aturan:
 
 Format dengan header 【】 untuk setiap bagian.`;
 
+// ── ローカルストレージ ヘルパー ──
+const LS_KEY = "sakura_candidates";
+const loadHistory = () => {
+  try {
+    const saved = localStorage.getItem(LS_KEY);
+    return saved ? JSON.parse(saved) : [];
+  } catch {
+    return [];
+  }
+};
+const persistHistory = (list) => {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(list)); } catch {}
+};
+
 export default function App() {
   const [screen, setScreen] = useState("list");
   const [step, setStep] = useState(0);
@@ -120,43 +134,48 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState("");
   const [copied, setCopied] = useState(false);
-  const [history, setHistory] = useState([]);
+  const [history, setHistory] = useState(loadHistory);   // ← 遅延初期化でlocalStorageから読込
   const [selectedCandidate, setSelectedCandidate] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [errorMsg, setErrorMsg] = useState("");
 
+  // historyが変わるたびにlocalStorageへ保存（state updater内での副作用を排除）
   useEffect(() => {
-    const saved = localStorage.getItem("sakura_candidates");
-    if (saved) setHistory(JSON.parse(saved));
-  }, []);
+    persistHistory(history);
+  }, [history]);
 
+  // ── スクロールトップ ──
+  const scrollTop = () => window.scrollTo({ top: 0, behavior: "smooth" });
+
+  // ── ステップ移動（スクロール付き）──
+  const goStep = (n) => { setStep(n); scrollTop(); };
+
+  // ── 候補者保存 ──
   const saveCandidate = (name, result, savedAnswers, savedEpisodes, savedFeedback) => {
+    const today = new Date().toLocaleDateString("ja-JP");
     setHistory(prev => {
-      // 同名・当日のエントリがあれば上書き、なければ新規追加
-      const today = new Date().toLocaleDateString("ja-JP");
       const idx = prev.findIndex(h => h.name === name && h.date === today);
-      const entry = { id: idx >= 0 ? prev[idx].id : Date.now(), name, date: today,
+      const entry = {
+        id: idx >= 0 ? prev[idx].id : Date.now(), name, date: today,
         result: result || (idx >= 0 ? prev[idx].result : ""),
         answers: savedAnswers || (idx >= 0 ? prev[idx].answers : {}),
         episodes: savedEpisodes || (idx >= 0 ? prev[idx].episodes : {}),
-        feedbackList: savedFeedback || (idx >= 0 ? prev[idx].feedbackList : []) };
-      const updated = idx >= 0
-        ? prev.map((h, i) => i === idx ? entry : h)
-        : [entry, ...prev];
-      localStorage.setItem("sakura_candidates", JSON.stringify(updated));
-      return updated;
+        feedbackList: savedFeedback || (idx >= 0 ? prev[idx].feedbackList : []),
+      };
+      return idx >= 0 ? prev.map((h, i) => i === idx ? entry : h) : [entry, ...prev];
     });
   };
 
+  // ── 候補者削除 ──
   const deleteCandidate = (id) => {
-    const updated = history.filter(h => h.id !== id);
-    setHistory(updated);
-    localStorage.setItem("sakura_candidates", JSON.stringify(updated));
+    setHistory(prev => prev.filter(h => h.id !== id));
   };
 
-  const callAI = async (prompt) => {
+  // ── AI呼び出し（429自動リトライ付き）──
+  const callAI = async (prompt, retryCount = 0) => {
     const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
     if (!apiKey) throw new Error("APIキーが設定されていません");
+
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
       {
@@ -164,26 +183,52 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { maxOutputTokens: 8000, temperature: 0.7 }
+          generationConfig: { maxOutputTokens: 8000, temperature: 0.7 },
         }),
       }
     );
+
+    // 429 レート制限 → 最大2回まで自動リトライ
+    if (res.status === 429) {
+      if (retryCount < 2) {
+        const waitSec = 50;
+        for (let i = waitSec; i > 0; i--) {
+          setLoadingMsg(`⏳ API制限中... ${i}秒後に自動再試行します / Otomatis coba lagi dalam ${i} detik...`);
+          await new Promise(r => setTimeout(r, 1000));
+        }
+        setLoadingMsg("🔄 再試行中... / Mencoba lagi...");
+        return callAI(prompt, retryCount + 1);
+      }
+      const err = await res.json().catch(() => ({}));
+      throw new Error(`APIエラー 429: クォータ超過。少し待ってから再試行してください。\n${err?.error?.message || ""}`);
+    }
+
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(`APIエラー ${res.status}: ${err?.error?.message || res.statusText}`);
     }
+
     const data = await res.json();
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) throw new Error("AIからの応答が空です");
     return text;
   };
 
+  // ── フィードバック取得 ──
   const handleFeedback = async () => {
     const filled = QUESTIONS.filter(q => answers[q.id]?.trim());
-    if (filled.length < 4) { setErrorMsg("最低4つ以上回答してください"); return; }
-    if (!profile.name.trim()) { setErrorMsg("候補者名を入力してください"); return; }
+    if (filled.length < 4) {
+      setErrorMsg("最低4つ以上回答してください / Minimal 4 jawaban diperlukan");
+      scrollTop();
+      return;
+    }
+    if (!profile.name.trim()) {
+      setErrorMsg("候補者名を入力してください / Masukkan nama kandidat");
+      scrollTop();
+      return;
+    }
     setLoading(true);
-    setLoadingMsg("AIが個別フィードバックを作成中... (10〜20秒)");
+    setLoadingMsg("🤖 AIが個別フィードバックを作成中... (10〜20秒)");
     setFeedbackList([]);
     setErrorMsg("");
     try {
@@ -194,40 +239,41 @@ export default function App() {
       if (!Array.isArray(parsed)) throw new Error("JSON形式が正しくありません");
       setFeedbackList(parsed);
       saveCandidate(profile.name, "", answers, episodes, parsed);
-      setStep(2);
+      goStep(2);  // ← スクロールトップ付きでステップ移動
     } catch (e) {
       setErrorMsg(`エラー: ${e.message}`);
+      scrollTop();
+    } finally {
+      setLoading(false);
+      setLoadingMsg("");
     }
-    setLoading(false);
-    setLoadingMsg("");
   };
 
+  // ── 日本語変換 ──
   const handleConvert = async () => {
     setLoading(true);
-    setLoadingMsg("やさしい日本語に変換中...");
+    setLoadingMsg("🌸 やさしい日本語に変換中...");
     setConverted("");
     setErrorMsg("");
     try {
       const raw = await callAI(buildConvertPrompt(answers, episodes, profile));
-      // **【見出し】** → 【見出し】、--- を削除
       const result = raw
-        .replace(/\*\*【/g, '【')
-        .replace(/】\*\*/g, '】')
-        .replace(/^\s*---\s*$/gm, '')
-        .replace(/\*\*/g, '')
-        .trim();
+        .replace(/\*\*【/g, "【").replace(/】\*\*/g, "】")
+        .replace(/^\s*---\s*$/gm, "").replace(/\*\*/g, "").trim();
       setConverted(result);
       saveCandidate(profile.name, result, answers, episodes, feedbackList);
-      setStep(3);
+      goStep(3);  // ← スクロールトップ付きでステップ移動
     } catch (e) {
       setErrorMsg(`変換エラー: ${e.message}`);
+      scrollTop();
+    } finally {
+      setLoading(false);
+      setLoadingMsg("");
     }
-    setLoading(false);
-    setLoadingMsg("");
   };
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(converted);
+  const handleCopy = (text) => {
+    navigator.clipboard.writeText(text || converted);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -236,6 +282,7 @@ export default function App() {
     setStep(0); setAnswers({}); setFeedbackList([]);
     setConverted(""); setProfile({ name: "", origin: "", jaLevel: "", careExp: "", motivation: "" });
     setEditingId(null); setErrorMsg(""); setScreen("list");
+    scrollTop();
   };
 
   const allGood = feedbackList.length > 0 && feedbackList.every(f => f.status === "good");
@@ -260,7 +307,7 @@ export default function App() {
     divider: { height: 1, background: "#e8ede9", margin: "20px 0" },
     tip: { background: "#fff8e6", border: "1px solid #ffd580", borderRadius: 10, padding: "12px 16px", fontSize: 13, color: "#7a5a00", marginBottom: 20 },
     profileTip: { background: "#e8f4ff", border: "1px solid #90caf9", borderRadius: 10, padding: "12px 16px", fontSize: 13, color: "#1a4a7a", marginBottom: 20 },
-    error: { background: "#fff0f0", border: "1.5px solid #ffb3b3", borderRadius: 10, padding: "14px 16px", fontSize: 13, color: "#cc0000", marginBottom: 16, lineHeight: 1.6 },
+    error: { background: "#fff0f0", border: "1.5px solid #ffb3b3", borderRadius: 10, padding: "14px 16px", fontSize: 13, color: "#cc0000", marginBottom: 16, lineHeight: 1.6, whiteSpace: "pre-wrap" },
     loadingBox: { background: "#e8f8f0", border: "1px solid #a8ddb8", borderRadius: 10, padding: "14px 16px", fontSize: 14, color: "#1a6636", marginBottom: 16, textAlign: "center" },
     convertBox: { background: "#e8f8f0", border: "1.5px solid #5cb882", borderRadius: 14, padding: "20px", whiteSpace: "pre-wrap", fontSize: 15, lineHeight: 2.0, color: "#1a3a26" },
     footer: { background: "#f7faf8", borderTop: "1px solid #e0ece4", padding: "12px 32px", fontSize: 12, color: "#888", textAlign: "center" },
@@ -268,6 +315,9 @@ export default function App() {
     profileBadge: { display: "inline-block", background: "#e8f4ff", border: "1px solid #90caf9", borderRadius: 20, padding: "3px 10px", fontSize: 11, color: "#1a4a7a", marginRight: 6, marginBottom: 4 },
   };
 
+  // ══════════════════════════════════
+  // 画面: 候補者一覧
+  // ══════════════════════════════════
   if (screen === "list") return (
     <div style={s.wrap}>
       <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;600;700&display=swap" rel="stylesheet" />
@@ -283,7 +333,7 @@ export default function App() {
         </div>
         <div style={s.body}>
           <button style={{ ...s.btn(), marginBottom: 24, width: "100%", fontSize: 16 }}
-            onClick={() => { setScreen("form"); setStep(0); }}>
+            onClick={() => { setScreen("form"); setStep(0); setAnswers({}); setEpisodes({}); setProfile({ name: "", origin: "", jaLevel: "", careExp: "", motivation: "" }); setFeedbackList([]); setConverted(""); setErrorMsg(""); }}>
             ➕ 新しい候補者を追加
           </button>
           {history.length === 0 ? (
@@ -311,9 +361,11 @@ export default function App() {
     </div>
   );
 
+  // ══════════════════════════════════
+  // 画面: 候補者詳細
+  // ══════════════════════════════════
   if (screen === "detail" && selectedCandidate) {
     const sc = selectedCandidate;
-    const hasFeedback = sc.feedbackList && sc.feedbackList.length > 0;
     const hasAnswers = sc.answers && Object.keys(sc.answers).length > 0;
     return (
       <div style={s.wrap}>
@@ -329,18 +381,21 @@ export default function App() {
             </div>
           </div>
           <div style={s.body}>
-
-            {/* 日本語変換 */}
             <p style={{ fontWeight: 700, color: "#2d7a4f", fontSize: 16, marginBottom: 10 }}>🇯🇵 やさしい日本語</p>
-            <div style={s.convertBox}>{sc.result}</div>
-            <div style={{ display: "flex", gap: 12, marginTop: 12, flexWrap: "wrap" }}>
-              <button style={s.btn(copied ? "#888" : "#1a6636")}
-                onClick={() => { navigator.clipboard.writeText(sc.result); setCopied(true); setTimeout(() => setCopied(false), 2000); }}>
-                {copied ? "✅ コピーしました！" : "📋 テキストをコピー"}
-              </button>
-            </div>
+            {sc.result ? (
+              <>
+                <div style={s.convertBox}>{sc.result}</div>
+                <div style={{ display: "flex", gap: 12, marginTop: 12, flexWrap: "wrap" }}>
+                  <button style={s.btn(copied ? "#888" : "#1a6636")}
+                    onClick={() => handleCopy(sc.result)}>
+                    {copied ? "✅ コピーしました！" : "📋 テキストをコピー"}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div style={{ color: "#aaa", padding: "12px 0" }}>（まだ変換されていません）</div>
+            )}
 
-            {/* インドネシア語回答 */}
             {hasAnswers && (
               <div style={{ marginTop: 28 }}>
                 <p style={{ fontWeight: 700, color: "#2d7a4f", fontSize: 15, marginBottom: 10 }}>🇮🇩 インドネシア語の元回答</p>
@@ -384,6 +439,9 @@ export default function App() {
     );
   }
 
+  // ══════════════════════════════════
+  // 画面: フォーム（STEP 0〜3）
+  // ══════════════════════════════════
   return (
     <div style={s.wrap}>
       <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;600;700&display=swap" rel="stylesheet" />
@@ -406,7 +464,7 @@ export default function App() {
         </div>
         <div style={s.body}>
 
-          {/* STEP 0: 施設情報 + 候補者プロフィール */}
+          {/* ── STEP 0: 施設情報 + 候補者プロフィール ── */}
           {step === 0 && (
             <div>
               <div style={s.profileTip}>
@@ -414,7 +472,6 @@ export default function App() {
                 <span style={{ fontSize: 12, opacity: 0.8 }}>Semakin lengkap profil, semakin personal feedbacknya!</span>
               </div>
 
-              {/* 必須 */}
               <div style={{ marginBottom: 14 }}>
                 <label style={s.label}>候補者名 / Nama Kandidat <span style={{ color: "#e53e3e" }}>*</span></label>
                 <input style={{ ...s.input, borderColor: "#4aab72" }}
@@ -473,15 +530,14 @@ export default function App() {
               ))}
               <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
                 <button style={s.btnOutline} onClick={() => setScreen("list")}>← 一覧に戻る</button>
-                <button style={s.btn()} onClick={() => { setErrorMsg(""); setStep(1); }}>次へ：回答入力へ →</button>
+                <button style={s.btn()} onClick={() => { setErrorMsg(""); goStep(1); }}>次へ：回答入力へ →</button>
               </div>
             </div>
           )}
 
-          {/* STEP 1: 回答入力 */}
+          {/* ── STEP 1: 回答入力 ── */}
           {step === 1 && (
             <div>
-              {/* プロフィールバッジ */}
               <div style={{ marginBottom: 16, padding: "10px 14px", background: "#f0f7ff", borderRadius: 10, border: "1px solid #c3deff" }}>
                 <span style={{ fontSize: 13, fontWeight: 700, color: "#1a4a7a" }}>👤 {profile.name}</span>
                 {profile.origin && <span style={s.profileBadge}>📍 {profile.origin}</span>}
@@ -509,17 +565,19 @@ export default function App() {
                   </div>
                 </div>
               ))}
-              <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
-                <button style={s.btnOutline} onClick={() => setStep(0)}>← 戻る</button>
-                <button style={{ ...s.btn(), opacity: loading ? 0.6 : 1 }}
-                  onClick={handleFeedback} disabled={loading}>
-                  {loading ? "⏳ AI確認中..." : "✨ フィードバックをもらう"}
+              <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap" }}>
+                <button style={s.btnOutline} onClick={() => goStep(0)}>← 戻る</button>
+                <button
+                  style={{ ...s.btn(), opacity: loading ? 0.6 : 1 }}
+                  onClick={handleFeedback}
+                  disabled={loading}>
+                  {loading ? "⏳ AI処理中..." : "✨ フィードバックをもらう"}
                 </button>
               </div>
             </div>
           )}
 
-          {/* STEP 2: 個別フィードバック */}
+          {/* ── STEP 2: フィードバック ── */}
           {step === 2 && (
             <div>
               <p style={{ fontWeight: 700, color: "#2d7a4f", fontSize: 16, marginBottom: 4 }}>
@@ -529,6 +587,7 @@ export default function App() {
                 🟢 = 良い回答　🔴 = 要修正　✏️ をクリックして直接編集できます
               </div>
               {errorMsg && <div style={s.error}>⚠️ {errorMsg}</div>}
+              {loading && <div style={s.loadingBox}>⏳ {loadingMsg}</div>}
 
               {QUESTIONS.map(q => {
                 const fb = feedbackList.find(f => f.id === q.id);
@@ -587,7 +646,7 @@ export default function App() {
               </div>
 
               <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                <button style={s.btnOutline} onClick={() => { setStep(1); setEditingId(null); }}>← 回答一覧に戻る</button>
+                <button style={s.btnOutline} onClick={() => { goStep(1); setEditingId(null); }}>← 回答一覧に戻る</button>
                 <button style={{ ...s.btn("#1a6636"), opacity: loading ? 0.6 : 1 }}
                   onClick={handleConvert} disabled={loading}>
                   {loading ? "⏳ 変換中..." : "🇯🇵 やさしい日本語に変換する"}
@@ -599,7 +658,7 @@ export default function App() {
             </div>
           )}
 
-          {/* STEP 3: 日本語変換 */}
+          {/* ── STEP 3: 日本語変換 ── */}
           {step === 3 && (
             <div>
               <p style={{ fontWeight: 700, color: "#2d7a4f", fontSize: 16, marginBottom: 16 }}>
@@ -610,7 +669,7 @@ export default function App() {
                 💡 候補者一覧に自動保存されました！LINEでコピーして送ってください。
               </div>
               <div style={{ display: "flex", gap: 12, marginTop: 20, flexWrap: "wrap" }}>
-                <button style={s.btn(copied ? "#888" : "#1a6636")} onClick={handleCopy}>
+                <button style={s.btn(copied ? "#888" : "#1a6636")} onClick={() => handleCopy()}>
                   {copied ? "✅ コピーしました！" : "📋 テキストをコピー"}
                 </button>
                 <button style={s.btnOutline} onClick={() => setScreen("list")}>📋 一覧に戻る</button>
