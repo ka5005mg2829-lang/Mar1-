@@ -52,62 +52,22 @@ const CARE_EXP = ["なし / Belum ada", "1年未満 / Kurang 1 tahun", "1〜3年
 
 const buildFeedbackPrompt = (answers, profile) => {
   const answeredQuestions = QUESTIONS.filter(q => answers[q.id]?.trim());
-  return `Kamu adalah pelatih wawancara kerja senior untuk posisi perawat (介護) di Jepang.
-Berikan feedback PERSONAL dan SPESIFIK untuk kandidat ini.
-
-=== PROFIL KANDIDAT ===
-Nama: ${profile.name}
-Asal daerah: ${profile.origin || "tidak disebutkan"}
-Level Bahasa Jepang: ${profile.jaLevel || "tidak diketahui"}
-Pengalaman perawatan: ${profile.careExp || "tidak disebutkan"}
-Motivasi khusus: ${profile.motivation || "tidak disebutkan"}
-
-=== JAWABAN KANDIDAT ===
-${answeredQuestions.map(q => `[${q.id}] ${q.label}:\n"${answers[q.id]}"`).join("\n\n")}
-
-=== INSTRUKSI PENTING ===
-1. Feedback HARUS menyebut kata/frasa SPESIFIK dari jawaban kandidat (bukan generik)
-2. Pertimbangkan latar belakang kandidat (asal daerah, level Jepang, pengalaman)
-3. Jika status "improve", contoh jawaban HARUS mengembangkan jawaban asli kandidat (bukan mengganti seluruhnya)
-4. Setiap feedback harus terasa PERSONAL untuk ${profile.name}, bukan template umum
-
-Balas HANYA dengan JSON array (tidak ada teks lain):
-[{"id":"${answeredQuestions[0]?.id}","status":"good","feedback":"feedback spesifik menyebut kata dari jawaban","feedbackJa":"日本語で短い要約（10字以内）","example":""}]
-
-Aturan JSON:
-- status: "good" atau "improve"  
-- feedback: 20-40 kata Bahasa Indonesia, HARUS kutip kata spesifik dari jawaban
-- feedbackJa: ringkasan 10 kata Bahasa Jepang untuk staf
-- example: jika "improve", kembangkan jawaban asli kandidat (bukan ganti seluruhnya), 30-50 kata
-- Sertakan semua ${answeredQuestions.length} pertanyaan`;
+  return `介護面接コーチ。候補者${profile.name}(${profile.origin||"-"},日本語:${profile.jaLevel||"-"},経験:${profile.careExp||"-"})のフィードバック。
+Jawaban:
+${answeredQuestions.map(q => `[${q.id}]:"${answers[q.id].slice(0,150)}"`).join("\n")}
+Balas HANYA JSON array:
+[{"id":"intro","status":"good","feedback":"20-30 kata Indonesia yg sebut kata spesifik dari jawaban","feedbackJa":"10字以内","example":""}]
+- status: "good"/"improve"; example: isi jika "improve" saja (30 kata); semua ${answeredQuestions.length} jawaban`;
 };
 
-const buildConvertPrompt = (answers, episodes, profile) => `
-Buat teks wawancara dalam bahasa Jepang mudah (やさしい日本語) untuk kandidat berikut.
-
-Kandidat: ${profile.name}
-Asal: ${profile.origin || "-"}
-Level Jepang: ${profile.jaLevel || "-"}
-Pengalaman: ${profile.careExp || "-"}
-Motivasi khusus: ${profile.motivation || "-"}
-
-Fasilitas: ${FACILITY.name}, ${FACILITY.location}
-
-Jawaban + Episode Pribadi:
-${QUESTIONS.map(q => {
-  if (!answers[q.id]) return "";
+const buildConvertPrompt = (answers, episodes, profile) => `やさしい日本語で面接文を作成。
+候補者:${profile.name}(${profile.origin||"-"},日本語${profile.jaLevel||"-"},経験${profile.careExp||"-"})
+施設:${FACILITY.name}
+${QUESTIONS.filter(q=>answers[q.id]).map(q => {
   const ep = episodes[q.id]?.trim();
-  return `${q.label}:\nJawaban: ${answers[q.id]}${ep ? `\nEpisode pribadi: ${ep}` : ""}`;
-}).filter(Boolean).join("\n\n")}
-
-Aturan:
-- Bahasa Jepang mudah, kalimat pendek, gunakan です・ます
-- WAJIB masukkan episode/pengalaman pribadi ke dalam teks agar terasa UNIK dan personal
-- Tampilkan kepribadian kandidat, bukan teks generik yang bisa dipakai siapa saja
-- JANGAN gunakan ** atau tanda markdown
-- JANGAN tambahkan --- di akhir
-
-Format dengan header 【】 untuk setiap bagian.`;
+  return `【${q.id}】${answers[q.id]}${ep?` (エピソード:${ep})`:""}`;
+}).join("\n")}
+ルール:やさしい日本語・です/ます体・エピソードを含める・【】ヘッダーで各パート・markdownなし`;
 
 // ── ローカルストレージ ヘルパー ──
 const LS_KEY = "sakura_candidates";
@@ -134,23 +94,18 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState("");
   const [copied, setCopied] = useState(false);
-  const [history, setHistory] = useState(loadHistory);   // ← 遅延初期化でlocalStorageから読込
+  const [history, setHistory] = useState(loadHistory);
   const [selectedCandidate, setSelectedCandidate] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [errorMsg, setErrorMsg] = useState("");
 
-  // historyが変わるたびにlocalStorageへ保存（state updater内での副作用を排除）
   useEffect(() => {
     persistHistory(history);
   }, [history]);
 
-  // ── スクロールトップ ──
   const scrollTop = () => window.scrollTo({ top: 0, behavior: "smooth" });
-
-  // ── ステップ移動（スクロール付き）──
   const goStep = (n) => { setStep(n); scrollTop(); };
 
-  // ── 候補者保存 ──
   const saveCandidate = (name, result, savedAnswers, savedEpisodes, savedFeedback) => {
     const today = new Date().toLocaleDateString("ja-JP");
     setHistory(prev => {
@@ -166,18 +121,15 @@ export default function App() {
     });
   };
 
-  // ── 候補者削除 ──
   const deleteCandidate = (id) => {
     setHistory(prev => prev.filter(h => h.id !== id));
   };
 
-  // ── AI呼び出し（429自動リトライ付き）──
   const callAI = async (prompt, retryCount = 0) => {
     const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
     if (!apiKey) throw new Error("APIキーが設定されていません");
-
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -187,103 +139,59 @@ export default function App() {
         }),
       }
     );
-
-    // 429 レート制限 → 最大2回まで自動リトライ
-    if (res.status === 429) {
-      if (retryCount < 2) {
-        const waitSec = 50;
+    if (res.status === 429 || res.status === 503) {
+      if (retryCount < 3) {
+        const waitSec = res.status === 429 ? 50 : 15;
+        const reason = res.status === 429 ? "API制限中 / Batas API tercapai" : "サービス一時停止中 / Layanan sementara tidak tersedia";
         for (let i = waitSec; i > 0; i--) {
-          setLoadingMsg(`⏳ API制限中... ${i}秒後に自動再試行します / Otomatis coba lagi dalam ${i} detik...`);
+          setLoadingMsg(`⏳ ${reason}... ${i}秒後に自動再試行 / Coba lagi dalam ${i} detik... (${retryCount + 1}/3)`);
           await new Promise(r => setTimeout(r, 1000));
         }
         setLoadingMsg("🔄 再試行中... / Mencoba lagi...");
         return callAI(prompt, retryCount + 1);
       }
       const err = await res.json().catch(() => ({}));
-      throw new Error(`APIエラー 429: クォータ超過。少し待ってから再試行してください。\n${err?.error?.message || ""}`);
+      const label = res.status === 429 ? "クォータ超過" : "サービス停止";
+      throw new Error(`APIエラー ${res.status}: ${label}。少し待ってから再試行してください。\n${err?.error?.message || ""}`);
     }
-
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(`APIエラー ${res.status}: ${err?.error?.message || res.statusText}`);
     }
-
     const data = await res.json();
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) throw new Error("AIからの応答が空です");
     return text;
   };
 
-  // ── フィードバック取得 ──
   const handleFeedback = async () => {
     const filled = QUESTIONS.filter(q => answers[q.id]?.trim());
-    if (filled.length < 4) {
-      setErrorMsg("最低4つ以上回答してください / Minimal 4 jawaban diperlukan");
-      scrollTop();
-      return;
-    }
-    if (!profile.name.trim()) {
-      setErrorMsg("候補者名を入力してください / Masukkan nama kandidat");
-      scrollTop();
-      return;
-    }
-    setLoading(true);
-    setLoadingMsg("🤖 AIが個別フィードバックを作成中... (10〜20秒)");
-    setFeedbackList([]);
-    setErrorMsg("");
+    if (filled.length < 4) { setErrorMsg("最低4つ以上回答してください / Minimal 4 jawaban diperlukan"); scrollTop(); return; }
+    if (!profile.name.trim()) { setErrorMsg("候補者名を入力してください / Masukkan nama kandidat"); scrollTop(); return; }
+    setLoading(true); setLoadingMsg("🤖 AIが個別フィードバックを作成中... (10〜20秒)"); setFeedbackList([]); setErrorMsg("");
     try {
       const result = await callAI(buildFeedbackPrompt(answers, profile));
       const match = result.match(/\[[\s\S]*\]/);
       if (!match) throw new Error("JSONが見つかりません。再試行してください。");
       const parsed = JSON.parse(match[0]);
       if (!Array.isArray(parsed)) throw new Error("JSON形式が正しくありません");
-      setFeedbackList(parsed);
-      saveCandidate(profile.name, "", answers, episodes, parsed);
-      goStep(2);  // ← スクロールトップ付きでステップ移動
-    } catch (e) {
-      setErrorMsg(`エラー: ${e.message}`);
-      scrollTop();
-    } finally {
-      setLoading(false);
-      setLoadingMsg("");
-    }
+      setFeedbackList(parsed); saveCandidate(profile.name, "", answers, episodes, parsed); goStep(2);
+    } catch (e) { setErrorMsg(`エラー: ${e.message}`); scrollTop(); }
+    finally { setLoading(false); setLoadingMsg(""); }
   };
 
-  // ── 日本語変換 ──
   const handleConvert = async () => {
-    setLoading(true);
-    setLoadingMsg("🌸 やさしい日本語に変換中...");
-    setConverted("");
-    setErrorMsg("");
+    setLoading(true); setLoadingMsg("🌸 やさしい日本語に変換中..."); setConverted(""); setErrorMsg("");
     try {
       const raw = await callAI(buildConvertPrompt(answers, episodes, profile));
-      const result = raw
-        .replace(/\*\*【/g, "【").replace(/】\*\*/g, "】")
-        .replace(/^\s*---\s*$/gm, "").replace(/\*\*/g, "").trim();
-      setConverted(result);
-      saveCandidate(profile.name, result, answers, episodes, feedbackList);
-      goStep(3);  // ← スクロールトップ付きでステップ移動
-    } catch (e) {
-      setErrorMsg(`変換エラー: ${e.message}`);
-      scrollTop();
-    } finally {
-      setLoading(false);
-      setLoadingMsg("");
-    }
+      const result = raw.replace(/\*\*【/g, "【").replace(/】\*\*/g, "】").replace(/^\s*---\s*$/gm, "").replace(/\*\*/g, "").trim();
+      setConverted(result); saveCandidate(profile.name, result, answers, episodes, feedbackList); goStep(3);
+    } catch (e) { setErrorMsg(`変換エラー: ${e.message}`); scrollTop(); }
+    finally { setLoading(false); setLoadingMsg(""); }
   };
 
-  const handleCopy = (text) => {
-    navigator.clipboard.writeText(text || converted);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleReset = () => {
-    setStep(0); setAnswers({}); setFeedbackList([]);
-    setConverted(""); setProfile({ name: "", origin: "", jaLevel: "", careExp: "", motivation: "" });
-    setEditingId(null); setErrorMsg(""); setScreen("list");
-    scrollTop();
-  };
+  const handleCopy = (text) => { navigator.clipboard.writeText(text || converted); setCopied(true); setTimeout(() => setCopied(false), 2000); };
+  const handleReset = () => { setStep(0); setAnswers({}); setFeedbackList([]); setConverted(""); setProfile({ name: "", origin: "", jaLevel: "", careExp: "", motivation: "" }); setEditingId(null); setErrorMsg(""); setScreen("list"); scrollTop(); };
 
   const allGood = feedbackList.length > 0 && feedbackList.every(f => f.status === "good");
   const STEPS = ["施設情報", "候補者回答", "フィードバック", "日本語変換"];
@@ -315,43 +223,18 @@ export default function App() {
     profileBadge: { display: "inline-block", background: "#e8f4ff", border: "1px solid #90caf9", borderRadius: 20, padding: "3px 10px", fontSize: 11, color: "#1a4a7a", marginRight: 6, marginBottom: 4 },
   };
 
-  // ══════════════════════════════════
-  // 画面: 候補者一覧
-  // ══════════════════════════════════
   if (screen === "list") return (
     <div style={s.wrap}>
       <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;600;700&display=swap" rel="stylesheet" />
       <div style={s.card}>
-        <div style={s.header}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <span style={{ fontSize: 32 }}>🌸</span>
-            <div>
-              <p style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>介護面接トレーナー</p>
-              <p style={{ fontSize: 13, opacity: 0.85, marginTop: 4 }}>候補者一覧</p>
-            </div>
-          </div>
-        </div>
+        <div style={s.header}><div style={{ display: "flex", alignItems: "center", gap: 12 }}><span style={{ fontSize: 32 }}>🌸</span><div><p style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>介護面接トレーナー</p><p style={{ fontSize: 13, opacity: 0.85, marginTop: 4 }}>候補者一覧</p></div></div></div>
         <div style={s.body}>
-          <button style={{ ...s.btn(), marginBottom: 24, width: "100%", fontSize: 16 }}
-            onClick={() => { setScreen("form"); setStep(0); setAnswers({}); setEpisodes({}); setProfile({ name: "", origin: "", jaLevel: "", careExp: "", motivation: "" }); setFeedbackList([]); setConverted(""); setErrorMsg(""); }}>
-            ➕ 新しい候補者を追加
-          </button>
-          {history.length === 0 ? (
-            <div style={{ textAlign: "center", color: "#aaa", padding: "40px 0" }}>
-              <div style={{ fontSize: 48 }}>📋</div>
-              <p>まだ候補者がいません</p>
-            </div>
-          ) : history.map(h => (
+          <button style={{ ...s.btn(), marginBottom: 24, width: "100%", fontSize: 16 }} onClick={() => { setScreen("form"); setStep(0); setAnswers({}); setEpisodes({}); setProfile({ name: "", origin: "", jaLevel: "", careExp: "", motivation: "" }); setFeedbackList([]); setConverted(""); setErrorMsg(""); }}>➕ 新しい候補者を追加</button>
+          {history.length === 0 ? (<div style={{ textAlign: "center", color: "#aaa", padding: "40px 0" }}><div style={{ fontSize: 48 }}>📋</div><p>まだ候補者がいません</p></div>) : history.map(h => (
             <div key={h.id} style={{ background: "#f7fdf9", border: "1px solid #d8f0e2", borderRadius: 12, padding: "16px", marginBottom: 12 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 16, color: "#1a5c36" }}>👤 {h.name}</div>
-                  <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>📅 {h.date}</div>
-                </div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button style={s.btnOutline} onClick={() => { setSelectedCandidate(h); setScreen("detail"); }}>確認</button>
-                  <button style={{ ...s.btnOutline, color: "#e53e3e", borderColor: "#e53e3e" }} onClick={() => deleteCandidate(h.id)}>削除</button>
-                </div>
+                <div><div style={{ fontWeight: 700, fontSize: 16, color: "#1a5c36" }}>👤 {h.name}</div><div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>📅 {h.date}</div></div>
+                <div style={{ display: "flex", gap: 8 }}><button style={s.btnOutline} onClick={() => { setSelectedCandidate(h); setScreen("detail"); }}>確認</button><button style={{ ...s.btnOutline, color: "#e53e3e", borderColor: "#e53e3e" }} onClick={() => deleteCandidate(h.id)}>削除</button></div>
               </div>
             </div>
           ))}
@@ -361,9 +244,6 @@ export default function App() {
     </div>
   );
 
-  // ══════════════════════════════════
-  // 画面: 候補者詳細
-  // ══════════════════════════════════
   if (screen === "detail" && selectedCandidate) {
     const sc = selectedCandidate;
     const hasAnswers = sc.answers && Object.keys(sc.answers).length > 0;
@@ -371,307 +251,113 @@ export default function App() {
       <div style={s.wrap}>
         <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;600;700&display=swap" rel="stylesheet" />
         <div style={s.card}>
-          <div style={s.header}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <span style={{ fontSize: 32 }}>👤</span>
-              <div>
-                <p style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>{sc.name}</p>
-                <p style={{ fontSize: 13, opacity: 0.85, marginTop: 4 }}>📅 {sc.date}</p>
-              </div>
-            </div>
-          </div>
+          <div style={s.header}><div style={{ display: "flex", alignItems: "center", gap: 12 }}><span style={{ fontSize: 32 }}>👤</span><div><p style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>{sc.name}</p><p style={{ fontSize: 13, opacity: 0.85, marginTop: 4 }}>📅 {sc.date}</p></div></div></div>
           <div style={s.body}>
             <p style={{ fontWeight: 700, color: "#2d7a4f", fontSize: 16, marginBottom: 10 }}>🇯🇵 やさしい日本語</p>
-            {sc.result ? (
-              <>
-                <div style={s.convertBox}>{sc.result}</div>
-                <div style={{ display: "flex", gap: 12, marginTop: 12, flexWrap: "wrap" }}>
-                  <button style={s.btn(copied ? "#888" : "#1a6636")}
-                    onClick={() => handleCopy(sc.result)}>
-                    {copied ? "✅ コピーしました！" : "📋 テキストをコピー"}
-                  </button>
-                </div>
-              </>
-            ) : (
-              <div style={{ color: "#aaa", padding: "12px 0" }}>（まだ変換されていません）</div>
-            )}
-
-            {hasAnswers && (
-              <div style={{ marginTop: 28 }}>
-                <p style={{ fontWeight: 700, color: "#2d7a4f", fontSize: 15, marginBottom: 10 }}>🇮🇩 インドネシア語の元回答</p>
-                {QUESTIONS.map(q => {
-                  const ans = sc.answers[q.id];
-                  const ep = sc.episodes?.[q.id];
-                  if (!ans?.trim()) return null;
-                  const fb = sc.feedbackList?.find(f => f.id === q.id);
-                  const isGood = fb?.status === "good";
-                  return (
-                    <div key={q.id} style={{ background: fb ? (isGood ? "#f0faf4" : "#fff8f0") : "#fafafa",
-                      border: `1.5px solid ${fb ? (isGood ? "#a8ddb8" : "#f6ad8f") : "#e0e0e0"}`,
-                      borderRadius: 12, padding: "12px 14px", marginBottom: 12 }}>
-                      <div style={{ fontWeight: 700, fontSize: 13, color: "#1a5c36", marginBottom: 6 }}>
-                        {fb ? (isGood ? "🟢" : "🔴") : "⬜"} {q.label}
-                      </div>
-                      <div style={{ fontSize: 13, color: "#333", marginBottom: ep ? 6 : 0, lineHeight: 1.7 }}>{ans}</div>
-                      {ep && (
-                        <div style={{ fontSize: 12, color: "#7a5c00", background: "#fffbea", border: "1px solid #ffd580", borderRadius: 8, padding: "6px 10px", marginTop: 4 }}>
-                          💡 エピソード: {ep}
-                        </div>
-                      )}
-                      {fb && (
-                        <div style={{ fontSize: 12, color: isGood ? "#1a6636" : "#8b4513", marginTop: 6, paddingTop: 6, borderTop: "1px solid rgba(0,0,0,0.08)" }}>
-                          💬 {fb.feedback}
-                          {fb.feedbackJa && <span style={{ color: "#555", marginLeft: 8 }}>／ 🇯🇵 {fb.feedbackJa}</span>}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            <div style={{ display: "flex", gap: 12, marginTop: 20, flexWrap: "wrap" }}>
-              <button style={s.btnOutline} onClick={() => setScreen("list")}>← 一覧に戻る</button>
-            </div>
+            {sc.result ? (<><div style={s.convertBox}>{sc.result}</div><div style={{ display: "flex", gap: 12, marginTop: 12, flexWrap: "wrap" }}><button style={s.btn(copied ? "#888" : "#1a6636")} onClick={() => handleCopy(sc.result)}>{copied ? "✅ コピーしました！" : "📋 テキストをコピー"}</button></div></>) : (<div style={{ color: "#aaa", padding: "12px 0" }}>（まだ変換されていません）</div>)}
+            {hasAnswers && (<div style={{ marginTop: 28 }}><p style={{ fontWeight: 700, color: "#2d7a4f", fontSize: 15, marginBottom: 10 }}>🇮🇩 インドネシア語の元回答</p>
+              {QUESTIONS.map(q => { const ans = sc.answers[q.id]; const ep = sc.episodes?.[q.id]; if (!ans?.trim()) return null; const fb = sc.feedbackList?.find(f => f.id === q.id); const isGood = fb?.status === "good";
+                return (<div key={q.id} style={{ background: fb ? (isGood ? "#f0faf4" : "#fff8f0") : "#fafafa", border: `1.5px solid ${fb ? (isGood ? "#a8ddb8" : "#f6ad8f") : "#e0e0e0"}`, borderRadius: 12, padding: "12px 14px", marginBottom: 12 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: "#1a5c36", marginBottom: 6 }}>{fb ? (isGood ? "🟢" : "🔴") : "⬜"} {q.label}</div>
+                  <div style={{ fontSize: 13, color: "#333", marginBottom: ep ? 6 : 0, lineHeight: 1.7 }}>{ans}</div>
+                  {ep && (<div style={{ fontSize: 12, color: "#7a5c00", background: "#fffbea", border: "1px solid #ffd580", borderRadius: 8, padding: "6px 10px", marginTop: 4 }}>💡 エピソード: {ep}</div>)}
+                  {fb && (<div style={{ fontSize: 12, color: isGood ? "#1a6636" : "#8b4513", marginTop: 6, paddingTop: 6, borderTop: "1px solid rgba(0,0,0,0.08)" }}>💬 {fb.feedback}{fb.feedbackJa && <span style={{ color: "#555", marginLeft: 8 }}>／ 🇯🇵 {fb.feedbackJa}</span>}</div>)}
+                </div>);
+              })}
+            </div>)}
+            <div style={{ display: "flex", gap: 12, marginTop: 20 }}><button style={s.btnOutline} onClick={() => setScreen("list")}>← 一覧に戻る</button></div>
           </div>
         </div>
       </div>
     );
   }
 
-  // ══════════════════════════════════
-  // 画面: フォーム（STEP 0〜3）
-  // ══════════════════════════════════
   return (
     <div style={s.wrap}>
       <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;600;700&display=swap" rel="stylesheet" />
       <div style={s.card}>
-        <div style={s.header}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <span style={{ fontSize: 32 }}>🌸</span>
-            <div>
-              <p style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>介護面接トレーナー</p>
-              <p style={{ fontSize: 13, opacity: 0.85, marginTop: 4 }}>インドネシア語 → やさしい日本語</p>
-            </div>
-          </div>
-        </div>
-        <div style={s.stepper}>
-          {STEPS.map((st, i) => (
-            <div key={i} style={s.stepItem(step === i, step > i)}>
-              {step > i ? "✓ " : `${i + 1}. `}{st}
-            </div>
-          ))}
-        </div>
+        <div style={s.header}><div style={{ display: "flex", alignItems: "center", gap: 12 }}><span style={{ fontSize: 32 }}>🌸</span><div><p style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>介護面接トレーナー</p><p style={{ fontSize: 13, opacity: 0.85, marginTop: 4 }}>インドネシア語 → やさしい日本語</p></div></div></div>
+        <div style={s.stepper}>{STEPS.map((st, i) => (<div key={i} style={s.stepItem(step === i, step > i)}>{step > i ? "✓ " : `${i + 1}. `}{st}</div>))}</div>
         <div style={s.body}>
 
-          {/* ── STEP 0: 施設情報 + 候補者プロフィール ── */}
           {step === 0 && (
             <div>
-              <div style={s.profileTip}>
-                💡 プロフィールを詳しく入力するほど、<strong>その人だけのフィードバック</strong>になります！<br />
-                <span style={{ fontSize: 12, opacity: 0.8 }}>Semakin lengkap profil, semakin personal feedbacknya!</span>
-              </div>
-
-              <div style={{ marginBottom: 14 }}>
-                <label style={s.label}>候補者名 / Nama Kandidat <span style={{ color: "#e53e3e" }}>*</span></label>
-                <input style={{ ...s.input, borderColor: "#4aab72" }}
-                  placeholder="例：Siti Rahayu"
-                  value={profile.name}
-                  onChange={e => setProfile({ ...profile, name: e.target.value })} />
-              </div>
-
+              <div style={s.profileTip}>💡 プロフィールを詳しく入力するほど、<strong>その人だけのフィードバック</strong>になります！<br /><span style={{ fontSize: 12, opacity: 0.8 }}>Semakin lengkap profil, semakin personal feedbacknya!</span></div>
+              <div style={{ marginBottom: 14 }}><label style={s.label}>候補者名 / Nama Kandidat <span style={{ color: "#e53e3e" }}>*</span></label><input style={{ ...s.input, borderColor: "#4aab72" }} placeholder="例：Siti Rahayu" value={profile.name} onChange={e => setProfile({ ...profile, name: e.target.value })} /></div>
               <div style={s.profileGrid}>
-                <div>
-                  <label style={s.label}>出身地 / Asal Daerah</label>
-                  <input style={s.input} placeholder="例：Jakarta, Jawa Barat..."
-                    value={profile.origin}
-                    onChange={e => setProfile({ ...profile, origin: e.target.value })} />
-                </div>
-                <div>
-                  <label style={s.label}>日本語レベル / Level Bahasa Jepang</label>
-                  <select style={s.select} value={profile.jaLevel}
-                    onChange={e => setProfile({ ...profile, jaLevel: e.target.value })}>
-                    <option value="">選択してください</option>
-                    {JA_LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
-                  </select>
-                </div>
+                <div><label style={s.label}>出身地 / Asal Daerah</label><input style={s.input} placeholder="例：Jakarta, Jawa Barat..." value={profile.origin} onChange={e => setProfile({ ...profile, origin: e.target.value })} /></div>
+                <div><label style={s.label}>日本語レベル / Level Bahasa Jepang</label><select style={s.select} value={profile.jaLevel} onChange={e => setProfile({ ...profile, jaLevel: e.target.value })}><option value="">選択してください</option>{JA_LEVELS.map(l => <option key={l} value={l}>{l}</option>)}</select></div>
               </div>
-
-              <div style={{ marginBottom: 14 }}>
-                <label style={s.label}>介護経験 / Pengalaman Perawatan</label>
-                <select style={s.select} value={profile.careExp}
-                  onChange={e => setProfile({ ...profile, careExp: e.target.value })}>
-                  <option value="">選択してください</option>
-                  {CARE_EXP.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
-
-              <div style={{ marginBottom: 20 }}>
-                <label style={s.label}>志望動機・特記事項 / Motivasi Khusus</label>
-                <textarea style={{ ...s.textarea, minHeight: 60 }}
-                  placeholder="例：祖父の介護経験あり / Punya pengalaman merawat kakek..."
-                  value={profile.motivation}
-                  onChange={e => setProfile({ ...profile, motivation: e.target.value })} />
-              </div>
-
+              <div style={{ marginBottom: 14 }}><label style={s.label}>介護経験 / Pengalaman Perawatan</label><select style={s.select} value={profile.careExp} onChange={e => setProfile({ ...profile, careExp: e.target.value })}><option value="">選択してください</option>{CARE_EXP.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+              <div style={{ marginBottom: 20 }}><label style={s.label}>志望動機・特記事項 / Motivasi Khusus</label><textarea style={{ ...s.textarea, minHeight: 60 }} placeholder="例：祖父の介護経験あり / Punya pengalaman merawat kakek..." value={profile.motivation} onChange={e => setProfile({ ...profile, motivation: e.target.value })} /></div>
               <div style={s.divider} />
               <p style={{ fontWeight: 700, color: "#2d7a4f", marginBottom: 12 }}>🏥 施設情報 / Informasi Fasilitas</p>
-              {[
-                { label: "施設名 / Nama", ja: FACILITY.name, id: FACILITY.nameId },
-                { label: "場所 / Lokasi", ja: FACILITY.location, id: FACILITY.locationId },
-                { label: "仕事内容 / Pekerjaan", ja: FACILITY.jobContent, id: FACILITY.jobContentId },
-                { label: "理念 / Filosofi", ja: FACILITY.philosophy, id: FACILITY.philosophyId },
-              ].map((f, i) => (
-                <div key={i} style={s.infoBox}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "#4aab72", marginBottom: 4 }}>{f.label}</div>
-                  <div style={{ fontSize: 14, color: "#1a3a26", fontWeight: 600, marginBottom: 4 }}>{f.ja}</div>
-                  <div style={{ fontSize: 13, color: "#5a8a6a" }}>{f.id}</div>
-                </div>
-              ))}
-              <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
-                <button style={s.btnOutline} onClick={() => setScreen("list")}>← 一覧に戻る</button>
-                <button style={s.btn()} onClick={() => { setErrorMsg(""); goStep(1); }}>次へ：回答入力へ →</button>
-              </div>
+              {[{ label: "施設名 / Nama", ja: FACILITY.name, id: FACILITY.nameId },{ label: "場所 / Lokasi", ja: FACILITY.location, id: FACILITY.locationId },{ label: "仕事内容 / Pekerjaan", ja: FACILITY.jobContent, id: FACILITY.jobContentId },{ label: "理念 / Filosofi", ja: FACILITY.philosophy, id: FACILITY.philosophyId }].map((f, i) => (<div key={i} style={s.infoBox}><div style={{ fontSize: 11, fontWeight: 700, color: "#4aab72", marginBottom: 4 }}>{f.label}</div><div style={{ fontSize: 14, color: "#1a3a26", fontWeight: 600, marginBottom: 4 }}>{f.ja}</div><div style={{ fontSize: 13, color: "#5a8a6a" }}>{f.id}</div></div>))}
+              <div style={{ display: "flex", gap: 12, marginTop: 16 }}><button style={s.btnOutline} onClick={() => setScreen("list")}>← 一覧に戻る</button><button style={s.btn()} onClick={() => { setErrorMsg(""); goStep(1); }}>次へ：回答入力へ →</button></div>
             </div>
           )}
 
-          {/* ── STEP 1: 回答入力 ── */}
           {step === 1 && (
             <div>
-              <div style={{ marginBottom: 16, padding: "10px 14px", background: "#f0f7ff", borderRadius: 10, border: "1px solid #c3deff" }}>
-                <span style={{ fontSize: 13, fontWeight: 700, color: "#1a4a7a" }}>👤 {profile.name}</span>
-                {profile.origin && <span style={s.profileBadge}>📍 {profile.origin}</span>}
-                {profile.jaLevel && <span style={s.profileBadge}>🇯🇵 {profile.jaLevel}</span>}
-                {profile.careExp && <span style={s.profileBadge}>💼 {profile.careExp}</span>}
-              </div>
+              <div style={{ marginBottom: 16, padding: "10px 14px", background: "#f0f7ff", borderRadius: 10, border: "1px solid #c3deff" }}><span style={{ fontSize: 13, fontWeight: 700, color: "#1a4a7a" }}>👤 {profile.name}</span>{profile.origin && <span style={s.profileBadge}>📍 {profile.origin}</span>}{profile.jaLevel && <span style={s.profileBadge}>🇯🇵 {profile.jaLevel}</span>}{profile.careExp && <span style={s.profileBadge}>💼 {profile.careExp}</span>}</div>
               <div style={s.tip}>🇮🇩 インドネシア語で答えてください！<br />Jawab dalam Bahasa Indonesia!</div>
               {errorMsg && <div style={s.error}>⚠️ {errorMsg}</div>}
               {loading && <div style={s.loadingBox}>⏳ {loadingMsg}</div>}
               {QUESTIONS.map(q => (
                 <div key={q.id} style={s.qBlock}>
                   <div style={{ fontSize: 13, fontWeight: 700, color: "#1a5c36", marginBottom: 8 }}>{q.label}</div>
-                  <textarea style={s.textarea} placeholder={q.placeholder}
-                    value={answers[q.id] || ""}
-                    onChange={e => setAnswers({ ...answers, [q.id]: e.target.value })} />
+                  <textarea style={s.textarea} placeholder={q.placeholder} value={answers[q.id] || ""} onChange={e => setAnswers({ ...answers, [q.id]: e.target.value })} />
                   <div style={{ marginTop: 6, padding: "8px 12px", background: "#fffbea", borderRadius: 8, border: "1px dashed #f0c040" }}>
-                    <div style={{ fontSize: 12, color: "#8a6800", marginBottom: 4, fontWeight: 600 }}>
-                      💡 {q.episodeHintId}
-                    </div>
-                    <textarea
-                      style={{ ...s.textarea, minHeight: 55, background: "#fffef5", border: "1px solid #f0c040", fontSize: 13 }}
-                      placeholder={q.episodePlaceholder}
-                      value={episodes[q.id] || ""}
-                      onChange={e => setEpisodes({ ...episodes, [q.id]: e.target.value })} />
+                    <div style={{ fontSize: 12, color: "#8a6800", marginBottom: 4, fontWeight: 600 }}>💡 {q.episodeHintId}</div>
+                    <textarea style={{ ...s.textarea, minHeight: 55, background: "#fffef5", border: "1px solid #f0c040", fontSize: 13 }} placeholder={q.episodePlaceholder} value={episodes[q.id] || ""} onChange={e => setEpisodes({ ...episodes, [q.id]: e.target.value })} />
                   </div>
                 </div>
               ))}
               <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap" }}>
                 <button style={s.btnOutline} onClick={() => goStep(0)}>← 戻る</button>
-                <button
-                  style={{ ...s.btn(), opacity: loading ? 0.6 : 1 }}
-                  onClick={handleFeedback}
-                  disabled={loading}>
-                  {loading ? "⏳ AI処理中..." : "✨ フィードバックをもらう"}
-                </button>
+                <button style={{ ...s.btn(), opacity: loading ? 0.6 : 1 }} onClick={handleFeedback} disabled={loading}>{loading ? "⏳ AI処理中..." : "✨ フィードバックをもらう"}</button>
               </div>
             </div>
           )}
 
-          {/* ── STEP 2: フィードバック ── */}
           {step === 2 && (
             <div>
-              <p style={{ fontWeight: 700, color: "#2d7a4f", fontSize: 16, marginBottom: 4 }}>
-                💬 {profile.name} さんへのフィードバック
-              </p>
-              <div style={{ ...s.tip, marginBottom: 16 }}>
-                🟢 = 良い回答　🔴 = 要修正　✏️ をクリックして直接編集できます
-              </div>
+              <p style={{ fontWeight: 700, color: "#2d7a4f", fontSize: 16, marginBottom: 4 }}>💬 {profile.name} さんへのフィードバック</p>
+              <div style={{ ...s.tip, marginBottom: 16 }}>🟢 = 良い回答　🔴 = 要修正　✏️ をクリックして直接編集できます</div>
               {errorMsg && <div style={s.error}>⚠️ {errorMsg}</div>}
               {loading && <div style={s.loadingBox}>⏳ {loadingMsg}</div>}
-
               {QUESTIONS.map(q => {
                 const fb = feedbackList.find(f => f.id === q.id);
                 if (!answers[q.id]?.trim()) return null;
                 const isGood = fb?.status === "good";
-                const bgColor = isGood ? "#f0faf4" : "#fff8f0";
-                const borderColor = isGood ? "#a8ddb8" : "#f6ad8f";
-                const icon = fb ? (isGood ? "🟢" : "🔴") : "⬜";
-
                 return (
-                  <div key={q.id} style={{ background: bgColor, border: `1.5px solid ${borderColor}`, borderRadius: 14, padding: "16px", marginBottom: 16 }}>
+                  <div key={q.id} style={{ background: isGood ? "#f0faf4" : "#fff8f0", border: `1.5px solid ${isGood ? "#a8ddb8" : "#f6ad8f"}`, borderRadius: 14, padding: "16px", marginBottom: 16 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                      <div style={{ fontWeight: 700, fontSize: 13, color: "#1a5c36" }}>{icon} {q.label}</div>
-                      <button style={s.btnSmall(editingId === q.id ? "#888" : "#2d7a4f")}
-                        onClick={() => setEditingId(editingId === q.id ? null : q.id)}>
-                        {editingId === q.id ? "✅ 閉じる" : "✏️ 編集"}
-                      </button>
+                      <div style={{ fontWeight: 700, fontSize: 13, color: "#1a5c36" }}>{fb ? (isGood ? "🟢" : "🔴") : "⬜"} {q.label}</div>
+                      <button style={s.btnSmall(editingId === q.id ? "#888" : "#2d7a4f")} onClick={() => setEditingId(editingId === q.id ? null : q.id)}>{editingId === q.id ? "✅ 閉じる" : "✏️ 編集"}</button>
                     </div>
-                    {editingId === q.id ? (
-                      <textarea style={{ ...s.textarea, marginBottom: 10, borderColor: "#4aab72" }}
-                        value={answers[q.id] || ""}
-                        onChange={e => setAnswers({ ...answers, [q.id]: e.target.value })} />
-                    ) : (
-                      <div style={{ fontSize: 13, color: "#333", background: "rgba(255,255,255,0.7)", borderRadius: 8, padding: "10px 12px", marginBottom: 10 }}>
-                        {answers[q.id]}
-                      </div>
-                    )}
-                    {fb && (
-                      <div>
-                        <div style={{ fontSize: 13, color: isGood ? "#1a6636" : "#8b4513", marginBottom: 4 }}>
-                          💬 {fb.feedback}
-                        </div>
-                        {fb.feedbackJa && (
-                          <div style={{ fontSize: 12, color: "#555", marginBottom: fb.example ? 8 : 0, fontStyle: "italic" }}>
-                            🇯🇵 {fb.feedbackJa}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    {fb?.example && !isGood && (
-                      <div style={{ background: "#fffbea", border: "1px solid #ffd580", borderRadius: 10, padding: "10px 12px", marginTop: 8 }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: "#b7791f", marginBottom: 6 }}>💡 改善例文 / Contoh pengembangan jawaban:</div>
-                        <div style={{ fontSize: 13, color: "#744210", lineHeight: 1.7 }}>{fb.example}</div>
-                        <button style={{ ...s.btnSmall("#b7791f"), marginTop: 8 }}
-                          onClick={() => setAnswers({ ...answers, [q.id]: fb.example })}>
-                          📋 この例文を使う
-                        </button>
-                      </div>
-                    )}
+                    {editingId === q.id ? (<textarea style={{ ...s.textarea, marginBottom: 10, borderColor: "#4aab72" }} value={answers[q.id] || ""} onChange={e => setAnswers({ ...answers, [q.id]: e.target.value })} />) : (<div style={{ fontSize: 13, color: "#333", background: "rgba(255,255,255,0.7)", borderRadius: 8, padding: "10px 12px", marginBottom: 10 }}>{answers[q.id]}</div>)}
+                    {fb && (<div><div style={{ fontSize: 13, color: isGood ? "#1a6636" : "#8b4513", marginBottom: 4 }}>💬 {fb.feedback}</div>{fb.feedbackJa && (<div style={{ fontSize: 12, color: "#555", marginBottom: fb.example ? 8 : 0, fontStyle: "italic" }}>🇯🇵 {fb.feedbackJa}</div>)}</div>)}
+                    {fb?.example && !isGood && (<div style={{ background: "#fffbea", border: "1px solid #ffd580", borderRadius: 10, padding: "10px 12px", marginTop: 8 }}><div style={{ fontSize: 11, fontWeight: 700, color: "#b7791f", marginBottom: 6 }}>💡 改善例文 / Contoh pengembangan jawaban:</div><div style={{ fontSize: 13, color: "#744210", lineHeight: 1.7 }}>{fb.example}</div><button style={{ ...s.btnSmall("#b7791f"), marginTop: 8 }} onClick={() => setAnswers({ ...answers, [q.id]: fb.example })}>📋 この例文を使う</button></div>)}
                   </div>
                 );
               })}
-
-              <div style={{ background: allGood ? "#d4f5e2" : "#fff3cd", border: `1px solid ${allGood ? "#4aab72" : "#ffd580"}`, borderRadius: 12, padding: "14px 16px", marginBottom: 20, textAlign: "center", fontWeight: 700, fontSize: 14, color: allGood ? "#1a6636" : "#856404" }}>
-                {allGood ? `✅ ${profile.name}さんの全回答がOKです！` : `⚠️ 🔴の回答を修正してから変換することをおすすめします`}
-              </div>
-
+              <div style={{ background: allGood ? "#d4f5e2" : "#fff3cd", border: `1px solid ${allGood ? "#4aab72" : "#ffd580"}`, borderRadius: 12, padding: "14px 16px", marginBottom: 20, textAlign: "center", fontWeight: 700, fontSize: 14, color: allGood ? "#1a6636" : "#856404" }}>{allGood ? `✅ ${profile.name}さんの全回答がOKです！` : `⚠️ 🔴の回答を修正してから変換することをおすすめします`}</div>
               <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
                 <button style={s.btnOutline} onClick={() => { goStep(1); setEditingId(null); }}>← 回答一覧に戻る</button>
-                <button style={{ ...s.btn("#1a6636"), opacity: loading ? 0.6 : 1 }}
-                  onClick={handleConvert} disabled={loading}>
-                  {loading ? "⏳ 変換中..." : "🇯🇵 やさしい日本語に変換する"}
-                </button>
-                <button style={{ ...s.btnOutline, opacity: loading ? 0.6 : 1 }} onClick={handleFeedback} disabled={loading}>
-                  🔄 再チェック
-                </button>
+                <button style={{ ...s.btn("#1a6636"), opacity: loading ? 0.6 : 1 }} onClick={handleConvert} disabled={loading}>{loading ? "⏳ 変換中..." : "🇯🇵 やさしい日本語に変換する"}</button>
+                <button style={{ ...s.btnOutline, opacity: loading ? 0.6 : 1 }} onClick={handleFeedback} disabled={loading}>🔄 再チェック</button>
               </div>
             </div>
           )}
 
-          {/* ── STEP 3: 日本語変換 ── */}
           {step === 3 && (
             <div>
-              <p style={{ fontWeight: 700, color: "#2d7a4f", fontSize: 16, marginBottom: 16 }}>
-                🇯🇵 {profile.name} さんのやさしい日本語
-              </p>
+              <p style={{ fontWeight: 700, color: "#2d7a4f", fontSize: 16, marginBottom: 16 }}>🇯🇵 {profile.name} さんのやさしい日本語</p>
               <div style={s.convertBox}>{converted}</div>
-              <div style={{ background: "#e6f4ff", border: "1px solid #90caf9", borderRadius: 10, padding: "12px 16px", marginTop: 16, fontSize: 13, color: "#0d47a1" }}>
-                💡 候補者一覧に自動保存されました！LINEでコピーして送ってください。
-              </div>
+              <div style={{ background: "#e6f4ff", border: "1px solid #90caf9", borderRadius: 10, padding: "12px 16px", marginTop: 16, fontSize: 13, color: "#0d47a1" }}>💡 候補者一覧に自動保存されました！LINEでコピーして送ってください。</div>
               <div style={{ display: "flex", gap: 12, marginTop: 20, flexWrap: "wrap" }}>
-                <button style={s.btn(copied ? "#888" : "#1a6636")} onClick={() => handleCopy()}>
-                  {copied ? "✅ コピーしました！" : "📋 テキストをコピー"}
-                </button>
+                <button style={s.btn(copied ? "#888" : "#1a6636")} onClick={() => handleCopy()}>{copied ? "✅ コピーしました！" : "📋 テキストをコピー"}</button>
                 <button style={s.btnOutline} onClick={() => setScreen("list")}>📋 一覧に戻る</button>
                 <button style={s.btnOutline} onClick={handleReset}>🔄 新しい候補者</button>
               </div>
