@@ -131,11 +131,21 @@ export default function App() {
   }, []);
 
   const saveCandidate = (name, result, savedAnswers, savedEpisodes, savedFeedback) => {
-    const newEntry = { id: Date.now(), name, date: new Date().toLocaleDateString("ja-JP"), result,
-      answers: savedAnswers || {}, episodes: savedEpisodes || {}, feedbackList: savedFeedback || [] };
-    const updated = [newEntry, ...history];
-    setHistory(updated);
-    localStorage.setItem("sakura_candidates", JSON.stringify(updated));
+    setHistory(prev => {
+      // 同名・当日のエントリがあれば上書き、なければ新規追加
+      const today = new Date().toLocaleDateString("ja-JP");
+      const idx = prev.findIndex(h => h.name === name && h.date === today);
+      const entry = { id: idx >= 0 ? prev[idx].id : Date.now(), name, date: today,
+        result: result || (idx >= 0 ? prev[idx].result : ""),
+        answers: savedAnswers || (idx >= 0 ? prev[idx].answers : {}),
+        episodes: savedEpisodes || (idx >= 0 ? prev[idx].episodes : {}),
+        feedbackList: savedFeedback || (idx >= 0 ? prev[idx].feedbackList : []) };
+      const updated = idx >= 0
+        ? prev.map((h, i) => i === idx ? entry : h)
+        : [entry, ...prev];
+      localStorage.setItem("sakura_candidates", JSON.stringify(updated));
+      return updated;
+    });
   };
 
   const deleteCandidate = (id) => {
@@ -183,6 +193,7 @@ export default function App() {
       const parsed = JSON.parse(match[0]);
       if (!Array.isArray(parsed)) throw new Error("JSON形式が正しくありません");
       setFeedbackList(parsed);
+      saveCandidate(profile.name, "", answers, episodes, parsed);
       setStep(2);
     } catch (e) {
       setErrorMsg(`エラー: ${e.message}`);
