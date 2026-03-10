@@ -2,27 +2,38 @@ import { useState, useEffect } from "react";
 
 const QUESTIONS = [
   { id: "intro", label: "① 自己紹介 / Perkenalan Diri", placeholder: "Nama, asal daerah, keluarga, pengalaman kerja sebelumnya...",
-    episodeHint: "出身地ならではのこと・家族のエピソードを1つ", episodeHintId: "Ceritakan 1 hal unik dari kampung halaman atau keluargamu" },
+    episodeHintId: "Ceritakan 1 hal tentang kampung halamanmu atau keluargamu",
+    episodePlaceholder: "Contoh: Saya dari Bandung. Di sana terkenal dengan... Keluarga saya ada 4 orang, ayah ibu dan adik. Sebelumnya saya pernah kerja di..." },
   { id: "reason", label: "② 介護を選んだ理由 / Alasan Memilih Perawatan", placeholder: "Kenapa kamu ingin bekerja di bidang perawatan?",
-    episodeHint: "介護・医療に関わった具体的な出来事はある？", episodeHintId: "Ada kejadian nyata yang membuatmu tertarik dengan perawatan?" },
+    episodeHintId: "Pernah merawat kakek/nenek/orang sakit? Ceritakan kejadian itu",
+    episodePlaceholder: "Contoh: Waktu saya kelas SMA, nenek saya sakit dan saya yang merawatnya setiap hari. Saya merasa senang bisa membantu..." },
   { id: "hardship", label: "③ 介護で大変だと思うこと / Hal Sulit dalam Perawatan", placeholder: "Menurutmu, apa yang paling sulit dalam pekerjaan perawatan?",
-    episodeHint: "誰かを助けて大変だった経験はある？", episodeHintId: "Punya pengalaman membantu orang lain yang terasa sulit?" },
+    episodeHintId: "Kapan kamu pernah merasa lelah tapi tetap bertahan? Ceritakan",
+    episodePlaceholder: "Contoh: Waktu kerja di toko/pabrik, saya pernah kerja 10 jam, kaki sakit tapi saya tetap senyum ke pelanggan karena itu kewajiban saya..." },
   { id: "whySakura", label: "④ なぜさくら会を選んだか / Kenapa Memilih Sakurakai", placeholder: "Kenapa kamu ingin bekerja di Sakurakai yang ada di Shinagawa, Tokyo?",
-    episodeHint: "さくら会の理念を読んで感じたことは？", episodeHintId: "Setelah baca filosofi Sakurakai, apa yang kamu rasakan?" },
+    episodeHintId: "Apa yang kamu rasakan setelah membaca tentang Sakurakai? Tuliskan dengan jujur",
+    episodePlaceholder: "Contoh: Saya baca bahwa Sakurakai membantu lansia tinggal di lingkungan sendiri. Hal itu sama seperti yang saya rasakan waktu nenek saya..." },
   { id: "health", label: "⑤ 体力・健康 / Kesehatan & Stamina", placeholder: "Apakah kamu bisa kerja shift malam?",
-    episodeHint: "体力に自信があると思った具体的な経験は？", episodeHintId: "Ada pengalaman yang membuatmu yakin punya stamina kuat?" },
+    episodeHintId: "Ceritakan olahraga atau kegiatan fisik yang kamu lakukan setiap hari/minggu",
+    episodePlaceholder: "Contoh: Setiap pagi saya lari 30 menit. Waktu kerja di pabrik dulu, saya kerja shift malam 3 bulan dan tidak pernah sakit..." },
   { id: "personality", label: "⑥ 性格・長所短所 / Kepribadian & Kelebihan/Kekurangan", placeholder: "Apa kelebihan dan kekuranganmu?",
-    episodeHint: "あなたの長所が活きた実際のエピソードを1つ", episodeHintId: "Ceritakan 1 kejadian nyata di mana kelebihanmu berguna" },
+    episodeHintId: "Kapan kamu pernah dipuji atau berhasil membantu seseorang? Ceritakan",
+    episodePlaceholder: "Contoh: Teman-teman sering bilang saya sabar. Waktu SMA, ada teman yang nangis dan saya yang menemaninya sampai tenang. Kekurangan saya adalah terlalu..." },
   { id: "trouble", label: "⑦ 困ったときの対処 / Cara Mengatasi Masalah", placeholder: "Kalau ada masalah saat bekerja, kamu akan bagaimana?",
-    episodeHint: "職場や学校で問題が起きたとき、どう対処した？", episodeHintId: "Ceritakan saat kamu menghadapi masalah di kerja/sekolah" },
+    episodeHintId: "Pernah ada masalah di tempat kerja atau sekolah? Ceritakan bagaimana kamu mengatasinya",
+    episodePlaceholder: "Contoh: Waktu kerja di restoran, ada pelanggan yang marah karena pesanan salah. Saya minta maaf dengan tulus, lalu lapor ke atasan dan kami beri pengganti gratis..." },
   { id: "japanese", label: "⑧ 日本語の勉強 / Belajar Bahasa Jepang", placeholder: "Sekarang kamu belajar bahasa Jepang seperti apa?",
-    episodeHint: "日本語で初めて会話できた嬉しかった瞬間は？", episodeHintId: "Ada momen bahagia saat pertama kali berhasil bicara Bahasa Jepang?" },
+    episodeHintId: "Ceritakan cara belajar bahasa Jepangmu sekarang (aplikasi, kursus, anime, dll)",
+    episodePlaceholder: "Contoh: Setiap hari saya belajar 1 jam dengan aplikasi Duolingo. Saya juga nonton anime dengan subtitle Jepang. Sudah bisa bilang あいさつ dan kalimat sederhana..." },
   { id: "future", label: "⑨ 将来の目標 / Tujuan Masa Depan", placeholder: "3〜5 tahun ke depan, kamu ingin jadi perawat seperti apa?",
-    episodeHint: "こんな介護士になりたいと思った、憧れの人は？", episodeHintId: "Ada perawat atau orang yang jadi idolamu? Kenapa?" },
+    episodeHintId: "Ada tokoh/orang yang kamu kagumi di bidang perawatan? Atau impian spesifik apa yang ingin kamu capai?",
+    episodePlaceholder: "Contoh: Saya ingin bisa ambil sertifikat 介護福祉士 dalam 3 tahun. Saya punya tante yang kerja di rumah sakit dan dia selalu bilang pekerjaan ini sangat berarti..." },
   { id: "teamwork", label: "⑩ チームワーク / Kerja Tim", placeholder: "Kalau pendapatmu berbeda dengan teman kerja, kamu akan bagaimana?",
-    episodeHint: "チームで意見が違った実際の経験を教えて", episodeHintId: "Ceritakan pengalaman nyata saat pendapatmu berbeda dengan tim" },
+    episodeHintId: "Pernah tidak setuju dengan teman/atasan? Ceritakan apa yang terjadi dan bagaimana kamu mengatasinya",
+    episodePlaceholder: "Contoh: Di tempat kerja lama, saya dan rekan berbeda pendapat soal jadwal. Saya ajak bicara baik-baik di luar jam kerja. Akhirnya kami menemukan solusi bersama..." },
   { id: "culture", label: "⑪ 日本の生活への適応 / Adaptasi Kehidupan Jepang", placeholder: "Apakah ada hal yang kamu khawatirkan tentang kehidupan di Jepang?",
-    episodeHint: "日本文化や習慣で驚いた・印象に残った体験は？", episodeHintId: "Ada pengalaman mengejutkan atau berkesan tentang budaya Jepang?" },
+    episodeHintId: "Sudah pernah dengar atau baca tentang kehidupan di Jepang? Apa yang membuatmu penasaran atau khawatir?",
+    episodePlaceholder: "Contoh: Saya dengar musim dingin di Jepang sangat berbeda dengan Indonesia. Saya belum pernah merasakan salju, tapi saya sudah beli baju tebal dan siap belajar..." },
 ];
 
 const FACILITY = {
@@ -430,13 +441,12 @@ export default function App() {
                     value={answers[q.id] || ""}
                     onChange={e => setAnswers({ ...answers, [q.id]: e.target.value })} />
                   <div style={{ marginTop: 6, padding: "8px 12px", background: "#fffbea", borderRadius: 8, border: "1px dashed #f0c040" }}>
-                    <div style={{ fontSize: 11, color: "#8a6800", marginBottom: 4 }}>
-                      💡 あなたの体験を教えて / Ceritakan pengalamanmu:<br/>
-                      <span style={{ fontSize: 11, color: "#6b7280" }}>{q.episodeHintId}</span>
+                    <div style={{ fontSize: 12, color: "#8a6800", marginBottom: 4, fontWeight: 600 }}>
+                      💡 {q.episodeHintId}
                     </div>
                     <textarea
                       style={{ ...s.textarea, minHeight: 55, background: "#fffef5", border: "1px solid #f0c040", fontSize: 13 }}
-                      placeholder={`例: ${q.episodeHint}`}
+                      placeholder={q.episodePlaceholder}
                       value={episodes[q.id] || ""}
                       onChange={e => setEpisodes({ ...episodes, [q.id]: e.target.value })} />
                   </div>
