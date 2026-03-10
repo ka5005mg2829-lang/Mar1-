@@ -1,17 +1,28 @@
 import { useState, useEffect } from "react";
 
 const QUESTIONS = [
-  { id: "intro", label: "① 自己紹介 / Perkenalan Diri", placeholder: "Nama, asal daerah, keluarga, pengalaman kerja sebelumnya..." },
-  { id: "reason", label: "② 介護を選んだ理由 / Alasan Memilih Perawatan", placeholder: "Kenapa kamu ingin bekerja di bidang perawatan?" },
-  { id: "hardship", label: "③ 介護で大変だと思うこと / Hal Sulit dalam Perawatan", placeholder: "Menurutmu, apa yang paling sulit dalam pekerjaan perawatan?" },
-  { id: "whySakura", label: "④ なぜさくら会を選んだか / Kenapa Memilih Sakurakai", placeholder: "Kenapa kamu ingin bekerja di Sakurakai yang ada di Shinagawa, Tokyo?" },
-  { id: "health", label: "⑤ 体力・健康 / Kesehatan & Stamina", placeholder: "Apakah kamu bisa kerja shift malam?" },
-  { id: "personality", label: "⑥ 性格・長所短所 / Kepribadian & Kelebihan/Kekurangan", placeholder: "Apa kelebihan dan kekuranganmu?" },
-  { id: "trouble", label: "⑦ 困ったときの対処 / Cara Mengatasi Masalah", placeholder: "Kalau ada masalah saat bekerja, kamu akan bagaimana?" },
-  { id: "japanese", label: "⑧ 日本語の勉強 / Belajar Bahasa Jepang", placeholder: "Sekarang kamu belajar bahasa Jepang seperti apa?" },
-  { id: "future", label: "⑨ 将来の目標 / Tujuan Masa Depan", placeholder: "3〜5 tahun ke depan, kamu ingin jadi perawat seperti apa?" },
-  { id: "teamwork", label: "⑩ チームワーク / Kerja Tim", placeholder: "Kalau pendapatmu berbeda dengan teman kerja, kamu akan bagaimana?" },
-  { id: "culture", label: "⑪ 日本の生活への適応 / Adaptasi Kehidupan Jepang", placeholder: "Apakah ada hal yang kamu khawatirkan tentang kehidupan di Jepang?" },
+  { id: "intro", label: "① 自己紹介 / Perkenalan Diri", placeholder: "Nama, asal daerah, keluarga, pengalaman kerja sebelumnya...",
+    episodeHint: "出身地ならではのこと・家族のエピソードを1つ", episodeHintId: "Ceritakan 1 hal unik dari kampung halaman atau keluargamu" },
+  { id: "reason", label: "② 介護を選んだ理由 / Alasan Memilih Perawatan", placeholder: "Kenapa kamu ingin bekerja di bidang perawatan?",
+    episodeHint: "介護・医療に関わった具体的な出来事はある？", episodeHintId: "Ada kejadian nyata yang membuatmu tertarik dengan perawatan?" },
+  { id: "hardship", label: "③ 介護で大変だと思うこと / Hal Sulit dalam Perawatan", placeholder: "Menurutmu, apa yang paling sulit dalam pekerjaan perawatan?",
+    episodeHint: "誰かを助けて大変だった経験はある？", episodeHintId: "Punya pengalaman membantu orang lain yang terasa sulit?" },
+  { id: "whySakura", label: "④ なぜさくら会を選んだか / Kenapa Memilih Sakurakai", placeholder: "Kenapa kamu ingin bekerja di Sakurakai yang ada di Shinagawa, Tokyo?",
+    episodeHint: "さくら会の理念を読んで感じたことは？", episodeHintId: "Setelah baca filosofi Sakurakai, apa yang kamu rasakan?" },
+  { id: "health", label: "⑤ 体力・健康 / Kesehatan & Stamina", placeholder: "Apakah kamu bisa kerja shift malam?",
+    episodeHint: "体力に自信があると思った具体的な経験は？", episodeHintId: "Ada pengalaman yang membuatmu yakin punya stamina kuat?" },
+  { id: "personality", label: "⑥ 性格・長所短所 / Kepribadian & Kelebihan/Kekurangan", placeholder: "Apa kelebihan dan kekuranganmu?",
+    episodeHint: "あなたの長所が活きた実際のエピソードを1つ", episodeHintId: "Ceritakan 1 kejadian nyata di mana kelebihanmu berguna" },
+  { id: "trouble", label: "⑦ 困ったときの対処 / Cara Mengatasi Masalah", placeholder: "Kalau ada masalah saat bekerja, kamu akan bagaimana?",
+    episodeHint: "職場や学校で問題が起きたとき、どう対処した？", episodeHintId: "Ceritakan saat kamu menghadapi masalah di kerja/sekolah" },
+  { id: "japanese", label: "⑧ 日本語の勉強 / Belajar Bahasa Jepang", placeholder: "Sekarang kamu belajar bahasa Jepang seperti apa?",
+    episodeHint: "日本語で初めて会話できた嬉しかった瞬間は？", episodeHintId: "Ada momen bahagia saat pertama kali berhasil bicara Bahasa Jepang?" },
+  { id: "future", label: "⑨ 将来の目標 / Tujuan Masa Depan", placeholder: "3〜5 tahun ke depan, kamu ingin jadi perawat seperti apa?",
+    episodeHint: "こんな介護士になりたいと思った、憧れの人は？", episodeHintId: "Ada perawat atau orang yang jadi idolamu? Kenapa?" },
+  { id: "teamwork", label: "⑩ チームワーク / Kerja Tim", placeholder: "Kalau pendapatmu berbeda dengan teman kerja, kamu akan bagaimana?",
+    episodeHint: "チームで意見が違った実際の経験を教えて", episodeHintId: "Ceritakan pengalaman nyata saat pendapatmu berbeda dengan tim" },
+  { id: "culture", label: "⑪ 日本の生活への適応 / Adaptasi Kehidupan Jepang", placeholder: "Apakah ada hal yang kamu khawatirkan tentang kehidupan di Jepang?",
+    episodeHint: "日本文化や習慣で驚いた・印象に残った体験は？", episodeHintId: "Ada pengalaman mengejutkan atau berkesan tentang budaya Jepang?" },
 ];
 
 const FACILITY = {
@@ -60,7 +71,7 @@ Aturan JSON:
 - Sertakan semua ${answeredQuestions.length} pertanyaan`;
 };
 
-const buildConvertPrompt = (answers, profile) => `
+const buildConvertPrompt = (answers, episodes, profile) => `
 Buat teks wawancara dalam bahasa Jepang mudah (やさしい日本語) untuk kandidat berikut.
 
 Kandidat: ${profile.name}
@@ -71,13 +82,17 @@ Motivasi khusus: ${profile.motivation || "-"}
 
 Fasilitas: ${FACILITY.name}, ${FACILITY.location}
 
-Jawaban:
-${QUESTIONS.map(q => answers[q.id] ? `${q.label}: ${answers[q.id]}` : "").filter(Boolean).join("\n")}
+Jawaban + Episode Pribadi:
+${QUESTIONS.map(q => {
+  if (!answers[q.id]) return "";
+  const ep = episodes[q.id]?.trim();
+  return `${q.label}:\nJawaban: ${answers[q.id]}${ep ? `\nEpisode pribadi: ${ep}` : ""}`;
+}).filter(Boolean).join("\n\n")}
 
 Aturan:
 - Bahasa Jepang mudah, kalimat pendek, gunakan です・ます
-- Sesuaikan dengan latar belakang ${profile.name} (asal daerah, motivasi spesifik mereka)
-- Tampilkan keunikan dan kepribadian kandidat, bukan teks generik
+- WAJIB masukkan episode/pengalaman pribadi ke dalam teks agar terasa UNIK dan personal
+- Tampilkan kepribadian kandidat, bukan teks generik yang bisa dipakai siapa saja
 - JANGAN gunakan ** atau tanda markdown
 - JANGAN tambahkan --- di akhir
 
@@ -87,6 +102,7 @@ export default function App() {
   const [screen, setScreen] = useState("list");
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState({});
+  const [episodes, setEpisodes] = useState({});
   const [profile, setProfile] = useState({ name: "", origin: "", jaLevel: "", careExp: "", motivation: "" });
   const [feedbackList, setFeedbackList] = useState([]);
   const [converted, setConverted] = useState("");
@@ -169,7 +185,7 @@ export default function App() {
     setConverted("");
     setErrorMsg("");
     try {
-      const raw = await callAI(buildConvertPrompt(answers, profile));
+      const raw = await callAI(buildConvertPrompt(answers, episodes, profile));
       // **【見出し】** → 【見出し】、--- を削除
       const result = raw
         .replace(/\*\*【/g, '【')
@@ -413,6 +429,17 @@ export default function App() {
                   <textarea style={s.textarea} placeholder={q.placeholder}
                     value={answers[q.id] || ""}
                     onChange={e => setAnswers({ ...answers, [q.id]: e.target.value })} />
+                  <div style={{ marginTop: 6, padding: "8px 12px", background: "#fffbea", borderRadius: 8, border: "1px dashed #f0c040" }}>
+                    <div style={{ fontSize: 11, color: "#8a6800", marginBottom: 4 }}>
+                      💡 あなたの体験を教えて / Ceritakan pengalamanmu:<br/>
+                      <span style={{ fontSize: 11, color: "#6b7280" }}>{q.episodeHintId}</span>
+                    </div>
+                    <textarea
+                      style={{ ...s.textarea, minHeight: 55, background: "#fffef5", border: "1px solid #f0c040", fontSize: 13 }}
+                      placeholder={`例: ${q.episodeHint}`}
+                      value={episodes[q.id] || ""}
+                      onChange={e => setEpisodes({ ...episodes, [q.id]: e.target.value })} />
+                  </div>
                 </div>
               ))}
               <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
